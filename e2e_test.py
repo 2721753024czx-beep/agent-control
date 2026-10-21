@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent
@@ -31,19 +32,15 @@ def main():
         from node import execute
         from runtime import NodeRuntime
 
-        echo_agent = temp / "echo_agent.py"
-        echo_agent.write_text("import sys\nprint(sys.argv[1])\n", encoding="utf-8")
-        command = '"%s" "%s" "{prompt}"' % (
-            sys.executable.replace("\\", "/"), str(echo_agent).replace("\\", "/")
-        )
+        serve_url = "http://127.0.0.1:4096"
         config = {
             "admin_token": "adm",
             "task_timeout_seconds": 900,
             "devices": [{"device_id": "win", "name": "Windows", "token": "tok"}],
             "agents": [{
-                "app_id": "cli_test", "device_id": "win", "agent_name": "opencode",
-                "display_name": "Windows-OpenCode", "engine_type": "cli",
-                "exec_path": command, "work_dir": str(temp), "app_secret": "sec",
+                "app_id": "serve_test", "device_id": "win", "agent_name": "opencode",
+                "display_name": "Windows-OpenCode", "engine_type": "serve",
+                "exec_path": serve_url, "work_dir": str(temp), "app_secret": "sec",
             }],
         }
         (temp / "hub-config.json").write_text(json.dumps(config), encoding="utf-8")
@@ -64,14 +61,14 @@ def main():
         db.init_db()
         db.upsert_device("win", "Windows", "tok")
         db.upsert_agent(
-            "cli_test", "win", "opencode", "Windows-OpenCode", "cli",
-            command, "sec", str(temp), None,
+            "serve_test", "win", "opencode", "Windows-OpenCode", "serve",
+            serve_url, "sec", str(temp), None,
         )
         fake = FakeClient()
-        hubmod.FEISHU_CLIENTS = {"cli_test": fake}
+        hubmod.FEISHU_CLIENTS = {"serve_test": fake}
         hubmod.CFG = config
 
-        hubmod.handle_message("cli_test", {
+        hubmod.handle_message("serve_test", {
             "message_id": "om_1", "chat_id": "oc_1", "chat_type": "p2p",
             "message_type": "text", "content": json.dumps({"text": "hello windows"}),
         }, {"open_id": "u1", "sender_type": "user"})
@@ -82,9 +79,15 @@ def main():
             "history_dir": str(temp / "history"),
             "budget_state_path": str(temp / "runtime" / "budget.json"),
             "budget": {"max_tasks_per_day": 5, "max_runtime_seconds_per_day": 60},
-            "allow_unsafe_cli": True,  # Isolated echo fixture only; production defaults to deny.
         }, temp)
-        result, session_id = execute(task, 30, runtime)
+        def fake_serve(engine, prompt, timeout, approval_client):
+            assert engine["base_url"] == serve_url
+            assert engine["work_dir"] == str(temp.resolve())
+            assert "isolated memory" in prompt and "hello windows" in prompt
+            return "hello windows", "ses_fixture"
+
+        with patch("node.run_serve", side_effect=fake_serve):
+            result, session_id = execute(task, 30, runtime)
         assert "hello windows" in result
         hubmod.report(task["task_id"], {"token": "tok", "result": result, "session_id": session_id})
 
@@ -94,7 +97,7 @@ def main():
         assert [item["event"] for item in events][-2:] == ["task_start", "task_done"]
 
     assert digest(REAL_CONFIG) == before, "real hub/config.json was modified"
-    print("E2E HUB -> NODE -> ISOLATED CLI FIXTURE -> REPLY OK")
+    print("E2E HUB -> NODE -> ISOLATED SERVE FIXTURE -> REPLY OK")
 
 
 if __name__ == "__main__":

@@ -87,8 +87,9 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("今日已启动任务 0/2", result)
         self.assertFalse((self.root / "budget.json").exists())
 
-    def test_phone_task_rejects_unrestricted_cli_by_default(self):
-        runtime = NodeRuntime({"history_dir": str(self.root / "history")}, self.root)
+    def test_phone_task_rejects_unrestricted_cli_even_with_legacy_opt_in(self):
+        runtime = NodeRuntime({"history_dir": str(self.root / "history"),
+                               "allow_unsafe_cli": True}, self.root)
         task = {
             "task_id": "t_safe", "prompt": "delete a file",
             "engine": {"type": "cli", "command": "opencode run {prompt}",

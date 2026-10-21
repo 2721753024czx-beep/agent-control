@@ -46,7 +46,7 @@ def execute(task, timeout, runtime=None, approval_client=None):
             runtime.audit.append("control", task_id=task["task_id"],
                                  command=task["prompt"].strip().split(maxsplit=1)[0].lower())
             return control_result, None
-        if engine["type"] == "cli" and not runtime.config.get("allow_unsafe_cli", False):
+        if engine["type"] == "cli":
             runtime.audit.append("safety_block", task_id=task["task_id"],
                                  reason="unrestricted CLI engine")
             raise PermissionError("手机普通任务需要受限 serve 模式；CLI 模式已拒绝执行")

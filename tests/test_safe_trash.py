@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "node"))
@@ -40,6 +41,40 @@ class SafeTrashTests(unittest.TestCase):
                     move_to_trash(root, "link")
             finally:
                 outside.rmdir()
+
+    def test_rejects_ambiguous_and_windows_style_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for value in (".", "a//b", "a/../b", "C:/Windows", r"..\outside",
+                          ".AGENT-CONTROL-TRASH/item"):
+                with self.subTest(path=value), self.assertRaises(ValueError):
+                    move_to_trash(root, value)
+
+    def test_manifest_exists_before_move_and_failed_move_is_clean(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "note.txt"
+            source.write_text("keep me", encoding="utf-8")
+
+            def fail_after_check(_source, target):
+                manifest = target.parent / "manifest.json"
+                self.assertTrue(manifest.is_file())
+                self.assertEqual(json.loads(manifest.read_text())["original"], "note.txt")
+                raise OSError("simulated rename failure")
+
+            with patch("safe_trash.os.rename", side_effect=fail_after_check):
+                with self.assertRaises(OSError):
+                    move_to_trash(root, "note.txt")
+            self.assertEqual(source.read_text(encoding="utf-8"), "keep me")
+            self.assertEqual(list((root / ".agent-control-trash").iterdir()), [])
+
+    def test_rejects_windows_reparse_point(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "junction").mkdir()
+            with patch("safe_trash._is_link_like", side_effect=lambda p: p.name == "junction"):
+                with self.assertRaises(ValueError):
+                    move_to_trash(root, "junction")
 
 
 if __name__ == "__main__":
