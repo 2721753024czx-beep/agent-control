@@ -114,6 +114,9 @@ def handle_message(app_id, message, sender):
     text = strip_mention(text)
     if not text:
         return
+    if text.lower().startswith("/trash ") and allowed_senders is None:
+        reply(app_id, msg_id, "电脑端尚未配置 allowed_open_ids，/trash 已拒绝。")
+        return
 
     approval_match = re.fullmatch(r"/(approve|reject) ([0-9a-f]{10})", text)
     if approval_match:

@@ -33,6 +33,8 @@ Hub 建立一次性、五分钟有效的审批记录，绑定 task、session、p
 
 要启用该链路，Hub agent 的 `engine_type` 必须为 `serve`，`exec_path` 指向回环 OpenCode 地址；Node 配置 `serve_password`，并由 `scripts/run_safe_opencode.py` 启动 OpenCode。启动器使用 `--pure`，将 shell、编辑、子任务和外部目录权限设为 `deny`。Node 每次从服务器读取工具 ID，只启用预设的只读工具；服务器缺少这些拒绝规则时任务会失败关闭。当前 macOS 正在运行的 CLI 配置尚未切换，不能把它视为受限模式。
 
+macOS 可先在 `node/config.json` 设置 `serve_password`（至少 32 字符）、`serve_port`（默认 4096）、`opencode_model`、`default_work_dir` 和 `allowed_work_dirs`，再运行 `bash scripts/install_safe_opencode_launchd.sh` 安装独立的回环服务。确认 `/config` 的拒绝规则后，把 Hub agent 改为 `serve` 并重启 Hub/Node。该脚本只重装 OpenCode 的 launchd 服务，不会触碰 Hub/Node。切换前备份本机配置；不要在文档或 Git 中记录服务密码。
+
 ## 删除的硬边界
 
 手机端审批不能批准删除。仅在消息里写“不要删除”或配置 `rm *: deny` 不够：`python`、`git clean`、PowerShell、补丁工具等都可能删除。真正的保护需要单独的远程执行身份或沙箱，禁止其直接修改原始工作区；每个任务先创建可恢复快照，在临时工作副本执行并检查文件差异。若差异含删除，禁止提交到原目录。

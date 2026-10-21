@@ -14,6 +14,26 @@ from runtime import NodeRuntime  # noqa: E402
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_trash_requires_sender_allowlist(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            root.mkdir(exist_ok=True)
+            with patch.object(db, "DB_PATH", root / "test.db"):
+                db.init_db()
+                db.upsert_device("dev", "device", "secret")
+                db.upsert_agent("app", "dev", "opencode", "Agent", "serve",
+                                "http://127.0.0.1:4096", "secret", str(root))
+                with patch.object(hub, "CFG", {"agents": [{"app_id": "app"}]}), \
+                     patch.object(hub, "reply") as reply:
+                    hub.handle_message("app", {
+                        "message_id": "trash-1", "message_type": "text",
+                        "content": '{"text": "/trash file.txt"}',
+                    }, {"open_id": "alice"})
+                self.assertIn("已拒绝", reply.call_args.args[2])
+                with sqlite3.connect(root / "test.db") as conn:
+                    count = conn.execute("SELECT count(*) FROM tasks").fetchone()[0]
+                self.assertEqual(count, 0)
+
     def test_sender_selection_isolated_and_task_directory_frozen(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

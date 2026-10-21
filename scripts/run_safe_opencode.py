@@ -25,13 +25,16 @@ def main():
         raise SystemExit("serve_port must be 1024..65535")
     env = os.environ.copy()
     env["OPENCODE_SERVER_PASSWORD"] = password
-    env["OPENCODE_CONFIG_CONTENT"] = json.dumps({"permission": {
+    server_config = {"permission": {
         "bash": "deny", "edit": "deny", "task": "deny",
         "external_directory": "deny", "read": "ask",
         "glob": "allow", "grep": "allow", "list": "allow",
         "webfetch": "ask", "websearch": "ask", "skill": "allow",
         "todowrite": "allow",
-    }})
+    }}
+    if config.get("opencode_model"):
+        server_config["model"] = config["opencode_model"]
+    env["OPENCODE_CONFIG_CONTENT"] = json.dumps(server_config)
     command = list(argv) + ["serve", "--pure", "--hostname", "127.0.0.1", "--port", str(port)]
     raise SystemExit(subprocess.call(command, cwd=config.get("default_work_dir") or ROOT, env=env))
 
