@@ -26,7 +26,8 @@ def main():
     env = os.environ.copy()
     env["OPENCODE_SERVER_PASSWORD"] = password
     server_config = {"permission": {
-        "bash": "deny", "edit": "deny", "task": "deny",
+        "*": "deny", "bash": "deny", "shell": "deny",
+        "edit": "deny", "write": "deny", "apply_patch": "deny", "task": "deny",
         "external_directory": "deny", "read": "ask",
         "glob": "allow", "grep": "allow", "list": "allow",
         "webfetch": "ask", "websearch": "ask", "skill": "allow",

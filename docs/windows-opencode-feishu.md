@@ -96,7 +96,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 1. 检查额度冷却、每日任务数和每日累计模型运行时。
 2. 在调用模型前写入 `task_start`，只记录 prompt 摘要，不保存原文。
 3. 读取当前工作目录 `.agent-memory` 并加入“只作上下文”的提示。
-4. 向受限的 `opencode serve --pure` 提交任务。Node 对每次任务禁用 shell、编辑、补丁、子任务和未知工具；单任务最多 600 秒。
+4. 向受限的 `opencode serve --pure` 提交任务。Node 对每次任务只显式禁用 shell、编辑、补丁、子任务和未知工具；只读工具由服务端 `read: ask` 等规则控制，不能在逐请求映射中设为 `true`；单任务最多 600 秒。
 5. 成功写 `task_done`；失败写 `task_failed`。
 6. 若错误包含 credits、quota、rate limit、余额不足等特征，冷却 6 小时，期间不再调用模型。
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-TOP_FILES = ("README.md", "AGENTS.md", "e2e_test.py")
+TOP_FILES = ("README.md", "AGENTS.md", "VERSION", "CHANGELOG.md", "e2e_test.py")
 PATTERNS = (
     "hub/*.py",
     "hub/requirements.txt",

@@ -31,7 +31,7 @@ Orca 的手机端把电脑作为会话和状态的权威来源，手机查看运
 
 Hub 建立一次性、五分钟有效的审批记录，绑定 task、session、permission、原发送者及原聊天。Node 的 `serve` 执行器轮询 OpenCode 的待决权限，创建飞书审批并等待 `/approve <短码>` 或 `/reject <短码>`。Node 只向 OpenCode 回复 `once` 或 `reject`，不发送“始终允许”。命令、文件修改、子任务和外部目录权限由 Hub 直接拒绝。
 
-要启用该链路，Hub agent 的 `engine_type` 必须为 `serve`，`exec_path` 指向回环 OpenCode 地址；Node 配置 `serve_password`，并由 `scripts/run_safe_opencode.py` 启动 OpenCode。启动器使用 `--pure`，将 shell、编辑、子任务和外部目录权限设为 `deny`。Node 每次从服务器读取工具 ID，只启用预设的只读工具；服务器缺少这些拒绝规则时任务会失败关闭。当前 macOS 正在运行的 CLI 配置尚未切换，不能把它视为受限模式。
+要启用该链路，Hub agent 的 `engine_type` 必须为 `serve`，`exec_path` 指向回环 OpenCode 地址；Node 配置 `serve_password`，并由 `scripts/run_safe_opencode.py` 启动 OpenCode。启动器使用 `--pure`，默认拒绝未知权限，并将 shell、编辑、子任务和外部目录权限设为 `deny`。Node 每次从服务器读取工具 ID，只显式禁用危险或未知工具；不能把只读工具设为 `true`，否则 OpenCode 1.19 的逐请求设置会覆盖服务端 `read: ask`，实测甚至覆盖 `read: deny`。服务器缺少默认拒绝、危险工具拒绝或 `read: ask` 时任务会失败关闭。macOS 已切换为受限 serve，但手机飞书审批尚未实测。
 
 macOS 可先在 `node/config.json` 设置 `serve_password`（至少 32 字符）、`serve_port`（默认 4096）、`opencode_model`、`default_work_dir` 和 `allowed_work_dirs`，再运行 `bash scripts/install_safe_opencode_launchd.sh` 安装独立的回环服务。确认 `/config` 的拒绝规则后，把 Hub agent 改为 `serve` 并重启 Hub/Node。该脚本只重装 OpenCode 的 launchd 服务，不会触碰 Hub/Node。切换前备份本机配置；不要在文档或 Git 中记录服务密码。
 
@@ -41,7 +41,7 @@ macOS 可先在 `node/config.json` 设置 `serve_password`（至少 32 字符）
 
 已实现 `/trash <工作区相对路径>`：Node 将指定文件或目录移动到同工作区的 `.agent-control-trash/<时间戳>-<随机ID>/`，写入原路径、暂存路径、任务 ID 与时间；不自动清空。路径穿越、符号链接、工作区根和暂存目录自身会被拒绝。OpenCode 提示词告知 Agent 推荐这个命令，但普通 OpenCode 工具仍有直接删除文件的能力。不要用 `/trash` 接受绝对路径。
 
-受限 `serve` 模式的 Agent 无法调用 shell、编辑、补丁、子任务和未知工具，只能通过单独的 `/trash` 控制命令移动文件。该模式尚需在真实手机飞书上完成安全验收。当前 CLI 运行模式仍未提供防删边界，不能把它当作受限模式。
+受限 `serve` 模式逐请求禁用 shell、编辑、补丁、子任务和未知工具；服务端也默认拒绝这些能力。清理须通过单独的 `/trash` 控制命令移动文件。该模式尚需在真实手机飞书上完成安全验收；CLI 模式仍未提供防删边界，不能用于手机普通任务。
 
 ## 验收
 

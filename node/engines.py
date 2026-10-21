@@ -106,10 +106,20 @@ def run_serve(engine, prompt, timeout, on_permission=None):
     permissions = config.get("permission") or {}
     if not isinstance(permissions, dict) or any(
         permissions.get(name) != "deny"
-        for name in ("bash", "edit", "task", "external_directory")
-    ):
+        for name in ("*", "bash", "shell", "edit", "write", "apply_patch",
+                     "task", "external_directory")
+    ) or permissions.get("read") != "ask":
         raise RuntimeError("OpenCode server lacks mandatory remote safety permissions")
-    tools = {tool_id: tool_id in SAFE_REMOTE_TOOLS for tool_id in tool_ids}
+    agents = config.get("agent") or {}
+    if not isinstance(agents, dict) or any(
+        isinstance(agent, dict) and "permission" in agent
+        for agent in agents.values()
+    ):
+        raise RuntimeError("OpenCode agent-specific permissions are not allowed for remote tasks")
+    # Explicit `True` overrides OpenCode's permission rules (including
+    # `read: ask` and even `read: deny`). Only disable disallowed tools here;
+    # omitted tools still obey the server's permission policy.
+    tools = {tool_id: False for tool_id in tool_ids if tool_id not in SAFE_REMOTE_TOOLS}
     created = request("POST", "/session", {})
     session_id = created.get("id") if isinstance(created, dict) else None
     if not session_id:
@@ -119,6 +129,7 @@ def run_serve(engine, prompt, timeout, on_permission=None):
 
     deadline = time.monotonic() + timeout
     handled = set()
+    completed = False
     try:
         while time.monotonic() < deadline:
             pending = request("GET", "/permission") or []
@@ -135,6 +146,8 @@ def run_serve(engine, prompt, timeout, on_permission=None):
                     allowed = bool(on_permission(session_id, permission_id, permission, item))
                 request("POST", "/permission/%s/reply" % permission_id,
                         {"reply": "once" if allowed else "reject"})
+                if not allowed:
+                    raise PermissionError("手机端审批已拒绝：%s" % permission)
 
             statuses = request("GET", "/session/status") or {}
             messages = request("GET", "/session/%s/message" % session_id) or []
@@ -146,10 +159,11 @@ def run_serve(engine, prompt, timeout, on_permission=None):
                     raise RuntimeError("OpenCode session failed: %s" % latest["info"]["error"])
                 result = _extract_text(latest.get("parts", [])).strip()
                 if result:
+                    completed = True
                     return result, session_id
             time.sleep(1)
     finally:
-        if time.monotonic() >= deadline:
+        if not completed:
             try:
                 request("POST", "/session/%s/abort" % session_id, {})
             except Exception:
