@@ -1,0 +1,15 @@
+{
+  "hub_url": "http://127.0.0.1:8000",
+  "device_id": "windows-opencode",
+  "token": "same-token-as-hub",
+  "poll_interval": 5,
+  "task_timeout": 600,
+  "history_dir": "C:/agent-control/history",
+  "budget_state_path": "C:/agent-control/runtime/budget.json",
+  "shared_memory_max_chars": 12000,
+  "budget": {
+    "max_tasks_per_day": 40,
+    "max_runtime_seconds_per_day": 7200,
+    "quota_error_cooldown_seconds": 21600
+  }
+}

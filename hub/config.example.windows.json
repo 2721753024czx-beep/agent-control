@@ -1,0 +1,19 @@
+{
+  "admin_token": "replace-with-random-token",
+  "task_timeout_seconds": 900,
+  "devices": [
+    {"device_id": "windows-opencode", "name": "Windows-PC", "token": "replace-with-random-token"}
+  ],
+  "agents": [
+    {
+      "app_id": "cli_xxxxxxxxxxxxxxxx",
+      "device_id": "windows-opencode",
+      "agent_name": "opencode",
+      "display_name": "Windows-OpenCode",
+      "engine_type": "cli",
+      "exec_path": "\"C:/Users/you/.opencode/bin/opencode.exe\" run \"{prompt}\"",
+      "work_dir": "C:/Users/you/projects",
+      "app_secret": "your_feishu_app_secret"
+    }
+  ]
+}

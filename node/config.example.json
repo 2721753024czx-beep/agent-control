@@ -1,0 +1,7 @@
+{
+  "hub_url": "http://100.64.1.2:8000",
+  "device_id": "pc1",
+  "token": "change-me-pc1-token",
+  "poll_interval": 5,
+  "task_timeout": 600
+}

@@ -1,0 +1,30 @@
+{
+  "admin_token": "change-me-admin-token",
+  "task_timeout_seconds": 900,
+  "devices": [
+    { "device_id": "pc1", "name": "PC1", "token": "change-me-pc1-token" },
+    { "device_id": "pc2", "name": "PC2", "token": "change-me-pc2-token" }
+  ],
+  "agents": [
+    {
+      "app_id": "cli_xxxxxxxxxxxxxxxx",
+      "device_id": "pc1",
+      "agent_name": "opencode",
+      "display_name": "PC1-OpenCode",
+      "engine_type": "cli",
+      "exec_path": "opencode run \"{prompt}\"",
+      "work_dir": "/Users/example/projects",
+      "app_secret": "your_feishu_app_secret_1"
+    },
+    {
+      "app_id": "cli_yyyyyyyyyyyyyyyy",
+      "device_id": "pc2",
+      "agent_name": "claude",
+      "display_name": "PC2-Claude",
+      "engine_type": "serve",
+      "exec_path": "http://127.0.0.1:4096",
+      "work_dir": null,
+      "app_secret": "your_feishu_app_secret_2"
+    }
+  ]
+}

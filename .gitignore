@@ -1,0 +1,26 @@
+# Local credentials and machine-specific configuration
+/hub/config.json
+/hub/config.json.*
+/node/config.json
+/node/config.json.*
+/.env
+/.env.*
+*.pem
+*.key
+
+# Runtime state and private project memory
+/hub/*.db
+/hub/*.db-*
+/logs/
+/history/
+/runtime/
+/backups/
+/.agent-memory/
+
+# Generated artifacts and local environments
+/dist/
+/.venv/
+/venv/
+**/__pycache__/
+*.py[cod]
+.DS_Store
