@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 
 
+PROTECTED_NAMES = {"AGENTS.md", "SKILL.md", "VERSION", "CHANGELOG.md"}
+
+
 def _is_link_like(path):
     """Reject symlinks and Windows reparse points (including junctions)."""
     try:
@@ -28,8 +31,12 @@ def move_to_trash(work_dir, relative_path, task_id=None):
     parts = relative_path.split("/")
     candidate = Path(relative_path)
     if (candidate.is_absolute() or PureWindowsPath(relative_path).drive
-            or any(part in ("", ".", "..") for part in parts)
-            or parts[0].casefold() == ".agent-control-trash"):
+            or len(relative_path) > 240
+            or any(not part or part in (".", "..") or part.startswith(".")
+                   or part.endswith((" ", ".")) or ":" in part
+                   or any(ord(char) < 32 for char in part)
+                   or PureWindowsPath(part).is_reserved() for part in parts)
+            or parts[-1].casefold() in {name.casefold() for name in PROTECTED_NAMES}):
         raise ValueError("只接受工作区内的相对路径")
     source = root.joinpath(*parts)
     # Reject links at every component, including the leaf. A resolved target

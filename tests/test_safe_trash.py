@@ -46,9 +46,25 @@ class SafeTrashTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             for value in (".", "a//b", "a/../b", "C:/Windows", r"..\outside",
-                          ".AGENT-CONTROL-TRASH/item"):
+                          ".AGENT-CONTROL-TRASH/item", "name:stream", "CON.txt",
+                          "name. ", "name\n", "a" * 241):
                 with self.subTest(path=value), self.assertRaises(ValueError):
                     move_to_trash(root, value)
+
+    def test_rejects_hidden_metadata_and_project_instructions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / ".git").mkdir()
+            (root / ".agent-memory").mkdir()
+            (root / ".agent-memory" / "context.md").write_text("keep", encoding="utf-8")
+            for value in (".git", ".agent-memory/context.md", ".agent-control-edits",
+                          "folder/.env", "AGENTS.md", "nested/SKILL.md", "VERSION",
+                          "Changelog.md"):
+                with self.subTest(path=value), self.assertRaises(ValueError):
+                    move_to_trash(root, value)
+            self.assertTrue((root / ".git").is_dir())
+            self.assertEqual((root / ".agent-memory" / "context.md").read_text(), "keep")
+            self.assertFalse((root / ".agent-control-trash").exists())
 
     def test_manifest_exists_before_move_and_failed_move_is_clean(self):
         with tempfile.TemporaryDirectory() as temp:
