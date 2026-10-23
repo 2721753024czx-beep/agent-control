@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS approvals (
     sender_open_id TEXT NOT NULL,
     chat_id TEXT NOT NULL,
     reply_message_id TEXT NOT NULL,
+    card_message_id TEXT,
     permission TEXT NOT NULL,
     detail TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending'
@@ -96,6 +97,9 @@ def init_db():
                 conn.execute("ALTER TABLE tasks ADD COLUMN work_dir TEXT")
             if "sender_open_id" not in columns:
                 conn.execute("ALTER TABLE tasks ADD COLUMN sender_open_id TEXT")
+            approval_columns = {row[1] for row in conn.execute("PRAGMA table_info(approvals)")}
+            if "card_message_id" not in approval_columns:
+                conn.execute("ALTER TABLE approvals ADD COLUMN card_message_id TEXT")
         finally:
             conn.close()
 
@@ -286,17 +290,44 @@ def create_approval(task_id, token, session_id, permission_id, permission, detai
             conn.close()
 
 
-def decide_approval(app_id, code, sender_open_id, chat_id, decision):
+def set_approval_card_message(code, message_id):
+    if not message_id:
+        return False
+    with _lock:
+        conn = _connect()
+        try:
+            updated = conn.execute(
+                """UPDATE approvals SET card_message_id=?
+                   WHERE code=? AND status='pending' AND card_message_id IS NULL""",
+                (message_id, code),
+            )
+            return updated.rowcount == 1
+        finally:
+            conn.close()
+
+
+def decide_approval(app_id, code, sender_open_id, chat_id, decision,
+                    card_message_id=None):
     if decision not in ("approved", "rejected"):
         raise ValueError("invalid decision")
     with _lock:
         conn = _connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT * FROM approvals WHERE code=? AND app_id=?", (code, app_id)).fetchone()
+            row = conn.execute(
+                """SELECT a.*, t.status AS task_status FROM approvals a
+                   JOIN tasks t ON t.task_id=a.task_id
+                   WHERE a.code=? AND a.app_id=?""", (code, app_id)
+            ).fetchone()
             if (row is None or row["sender_open_id"] != sender_open_id
-                    or row["chat_id"] != chat_id or row["status"] != "pending"):
+                    or row["chat_id"] != chat_id or row["status"] != "pending"
+                    or (card_message_id is not None and
+                        (not card_message_id or row["card_message_id"] != card_message_id))):
                 conn.execute("ROLLBACK")
+                return None
+            if row["task_status"] != "running":
+                conn.execute("UPDATE approvals SET status='expired' WHERE code=?", (code,))
+                conn.execute("COMMIT")
                 return None
             if int(row["expires_at"]) <= int(conn.execute("SELECT strftime('%s','now')").fetchone()[0]):
                 conn.execute("UPDATE approvals SET status='expired' WHERE code=?", (code,))

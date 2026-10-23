@@ -70,7 +70,10 @@ def parse_proposal(response):
     text = response.strip()
     if text.startswith("```json") and text.endswith("```"):
         text = text[7:-3].strip()
-    parsed = json.loads(text)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError("模型未返回有效 JSON 草案；未发送修改审批，文件未变更") from exc
     if not isinstance(parsed, dict) or not isinstance(parsed.get("content"), str):
         raise ValueError("模型未返回含 content 字段的 JSON 草案")
     content = parsed["content"]

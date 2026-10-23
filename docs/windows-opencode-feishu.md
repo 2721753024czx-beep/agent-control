@@ -28,6 +28,7 @@ OpenCode 官方在 Windows 上更推荐 WSL，但也明确支持直接运行。�
    - `im:message`
    - `im:message:send_as_bot`
    - 长连接事件 `im.message.receive_v1`
+   - 审批按钮还需长连接回调 `card.action.trigger`，并重新发布应用版本
 5. 已安装的 `lark-cli --version` 可正常执行。
 6. 该飞书 App ID 必须只由 Windows Hub 使用。若 Mac Hub 正在使用同一 App ID，先停止 Mac Hub；或者为 Windows 创建独立飞书应用。两个 Hub 同时连接同一应用时，不能保证手机事件落到 Windows。
 
@@ -104,7 +105,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 History 任务每 5 分钟写入 `history/snapshots-YYYY-MM-DD.jsonl`，任务事件写入 `history/tasks-YYYY-MM-DD.jsonl`，默认保留 30 天。记录不包含飞书消息正文、模型答案、token 或 App Secret。
 
-如需多个工作目录，在 Hub agent 中配置 `workspaces` 别名、Node 中配置相同目录的 `allowed_work_dirs`，详见 [手机端控制设计](mobile-control-design.md)。飞书 `/trash <相对路径>` 只把普通路径移动到工作区内可恢复目录；隐藏路径、项目指令/版本文件及 Windows 保留名不可暂存。只读工具的待审批请求可由飞书 `/approve <短码>` 或 `/reject <短码>` 处理；OpenCode 原生 shell/edit 权限始终被拒绝。配置发送者白名单后，可用 `/edit <相对文本文件>: <要求>` 生成单文件草案并审批完整差异；Windows 实机仍需验证。
+如需多个工作目录，在 Hub agent 中配置 `workspaces` 别名、Node 中配置相同目录的 `allowed_work_dirs`，详见 [手机端控制设计](mobile-control-design.md)。飞书 `/trash <相对路径>` 只把普通路径移动到工作区内可恢复目录；隐藏路径、项目指令/版本文件及 Windows 保留名不可暂存。只读工具待审批请求优先点卡片「批准一次」或「拒绝」，也可发送 `/approve <短码>` 或 `/reject <短码>`；OpenCode 原生 shell/edit 权限始终被拒绝。配置发送者白名单后，可用 `/edit <相对文本文件>: <要求>` 生成单文件草案并审批完整差异；Windows 实机仍需验证。
 
 ## 运维
 

@@ -15,7 +15,7 @@ from db import (
     get_agent, init_db, list_agents,
     get_workspace_selection, set_workspace_selection,
     mark_message_processed, mark_timeout_tasks, message_seen,
-    report_task, set_display_name, upsert_agent, upsert_device,
+    report_task, set_approval_card_message, set_display_name, upsert_agent, upsert_device,
 )
 from feishu_client import FeishuClient
 
@@ -186,6 +186,30 @@ def make_handler(app_id):
     return on_message
 
 
+def handle_card_action(app_id, event):
+    value = event.get("value")
+    if (event.get("tag") != "button" or not isinstance(value, dict)
+            or set(value) != {"kind", "code", "decision"}
+            or value.get("kind") != "approval"
+            or not isinstance(value.get("code"), str)
+            or not re.fullmatch(r"[0-9a-f]{10}", value["code"])
+            or value.get("decision") not in ("approved", "rejected")
+            or not all(isinstance(event.get(key), str) and event[key]
+                       for key in ("open_id", "chat_id", "message_id"))):
+        return {"ok": False, "text": "审批操作无效。"}
+    applied = decide_approval(
+        app_id, value["code"], event["open_id"], event["chat_id"],
+        value["decision"], card_message_id=event["message_id"])
+    return ({"ok": True, "text": "已批准一次。" if applied == "approved" else "已拒绝。"}
+            if applied else {"ok": False, "text": "审批无效、已处理或已过期。"})
+
+
+def make_card_handler(app_id):
+    def on_card_action(event):
+        return handle_card_action(app_id, event)
+    return on_card_action
+
+
 def sweeper():
     while True:
         time.sleep(60)
@@ -218,7 +242,7 @@ async def lifespan(_app):
         if not a["enabled"]:
             continue
         fc = FeishuClient(a["app_id"], a["app_secret"])
-        fc.start_ws(make_handler(a["app_id"]))
+        fc.start_ws(make_handler(a["app_id"]), make_card_handler(a["app_id"]))
         FEISHU_CLIENTS[a["app_id"]] = fc
         log.info("ws started for %s", a["display_name"])
     threading.Thread(target=sweeper, daemon=True).start()
@@ -270,9 +294,22 @@ def request_approval(task_id: str, payload: dict,
     if approval is None:
         raise HTTPException(status_code=404, detail="task not found or unauthorized")
     if approval["status"] == "pending" and approval["created"]:
-        reply(approval["app_id"], approval["reply_message_id"],
-              "待审批 [%s]：%s\n只批准这一次：/approve %s\n拒绝：/reject %s\n5 分钟后过期。" %
-              (approval["permission"], approval["detail"], approval["code"], approval["code"]))
+        fc = FEISHU_CLIENTS.get(approval["app_id"])
+        sent = False
+        if fc is not None and hasattr(fc, "reply_approval_card"):
+            try:
+                card_id = fc.reply_approval_card(
+                    approval["reply_message_id"], approval["permission"],
+                    approval["detail"], approval["code"])
+                sent = set_approval_card_message(approval["code"], card_id)
+                if not sent:
+                    log.warning("approval card %s was sent but not bound", approval["code"])
+            except Exception:
+                log.exception("approval card send failed; using text fallback")
+        if not sent:
+            reply(approval["app_id"], approval["reply_message_id"],
+                  "待审批 [%s]：%s\n只批准这一次：/approve %s\n拒绝：/reject %s\n5 分钟后过期。" %
+                  (approval["permission"], approval["detail"], approval["code"], approval["code"]))
     return {"code": approval["code"], "status": approval["status"]}
 
 
