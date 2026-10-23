@@ -2,6 +2,7 @@ import sqlite3
 import threading
 import uuid
 import os
+import re
 from pathlib import Path
 
 DB_PATH = Path(os.environ.get("AGENT_CONTROL_DB", Path(__file__).parent / "hub.db"))
@@ -234,7 +235,7 @@ def create_task(app_id, device_id, prompt, reply_message_id=None, reply_chat_id=
 
 
 def create_approval(task_id, token, session_id, permission_id, permission, detail,
-                    lifetime_seconds=300):
+                    lifetime_seconds=300, safe_change_senders=None):
     code = uuid.uuid4().hex[:10]
     with _lock:
         conn = _connect()
@@ -249,6 +250,16 @@ def create_approval(task_id, token, session_id, permission_id, permission, detai
                     or not task["sender_open_id"] or not task["reply_chat_id"]):
                 conn.execute("ROLLBACK")
                 return None
+            if permission == "safe_change":
+                edit = re.fullmatch(r"/edit ([^:\r\n]+):\s*(.+)", task["prompt"].strip(), re.DOTALL)
+                path = edit.group(1).strip() if edit else ""
+                if (safe_change_senders is None
+                        or task["sender_open_id"] not in safe_change_senders.get(task["app_id"], [])
+                        or permission_id != "safe-edit-" + task_id
+                        or not path or len(detail) > 1800
+                        or not detail.startswith("--- a/" + path + "\n+++ b/" + path + "\n")):
+                    conn.execute("ROLLBACK")
+                    return None
             existing = conn.execute(
                 "SELECT * FROM approvals WHERE task_id=? AND session_id=? AND permission_id=?",
                 (task_id, session_id, permission_id),

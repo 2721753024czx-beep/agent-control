@@ -104,7 +104,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 History 任务每 5 分钟写入 `history/snapshots-YYYY-MM-DD.jsonl`，任务事件写入 `history/tasks-YYYY-MM-DD.jsonl`，默认保留 30 天。记录不包含飞书消息正文、模型答案、token 或 App Secret。
 
-如需多个工作目录，在 Hub agent 中配置 `workspaces` 别名、Node 中配置相同目录的 `allowed_work_dirs`，详见 [手机端控制设计](mobile-control-design.md)。飞书 `/trash <相对路径>` 会移动文件到工作区内可恢复目录。只读工具的待审批请求可由飞书 `/approve <短码>` 或 `/reject <短码>` 处理；命令和文件修改权限始终被拒绝。
+如需多个工作目录，在 Hub agent 中配置 `workspaces` 别名、Node 中配置相同目录的 `allowed_work_dirs`，详见 [手机端控制设计](mobile-control-design.md)。飞书 `/trash <相对路径>` 会移动文件到工作区内可恢复目录。只读工具的待审批请求可由飞书 `/approve <短码>` 或 `/reject <短码>` 处理；OpenCode 原生 shell/edit 权限始终被拒绝。配置发送者白名单后，可用 `/edit <相对文本文件>: <要求>` 生成单文件草案并审批完整差异；Windows 实机仍需验证。
 
 ## 运维
 

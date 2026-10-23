@@ -98,7 +98,10 @@ def handle_message(app_id, message, sender):
 
     configured = next((a for a in CFG.get("agents", []) if a.get("app_id") == app_id), {})
     allowed_senders = configured.get("allowed_open_ids")
-    if allowed_senders is not None and sender.get("open_id") not in allowed_senders:
+    valid_allowlist = isinstance(allowed_senders, list) and all(
+        isinstance(item, str) and item for item in allowed_senders)
+    if allowed_senders is not None and (
+            not valid_allowlist or sender.get("open_id") not in allowed_senders):
         log.warning("sender not allowed for app_id=%s", app_id)
         return
 
@@ -114,8 +117,8 @@ def handle_message(app_id, message, sender):
     text = strip_mention(text)
     if not text:
         return
-    if text.lower().startswith("/trash ") and allowed_senders is None:
-        reply(app_id, msg_id, "电脑端尚未配置 allowed_open_ids，/trash 已拒绝。")
+    if text.lower().startswith(("/trash", "/edit")) and (not valid_allowlist or not allowed_senders):
+        reply(app_id, msg_id, "电脑端尚未配置 allowed_open_ids，/trash 与 /edit 已拒绝。")
         return
 
     approval_match = re.fullmatch(r"/(approve|reject) ([0-9a-f]{10})", text)
@@ -247,17 +250,23 @@ def pull_tasks(device_id: str, token: str = None,
 def request_approval(task_id: str, payload: dict,
                      x_device_token: str = Header(default=None)):
     permission = str(payload.get("permission") or "").lower()
-    # Until a protected executor exists, mobile may only approve read-only
-    # tool classes. In particular, shell/edit/task permissions never reach a
-    # user-approvable state, regardless of the command text.
-    if permission not in {"read", "glob", "grep", "list", "lsp", "skill", "webfetch", "websearch"}:
+    # safe_change is a Node-mediated single-file proposal, not OpenCode's
+    # unrestricted edit tool. Shell/edit/task permissions remain forbidden.
+    if permission not in {"read", "glob", "grep", "list", "lsp", "skill", "webfetch", "websearch", "safe_change"}:
         raise HTTPException(status_code=403, detail="permission class not approvable remotely")
     session_id = str(payload.get("session_id") or "")
     permission_id = str(payload.get("permission_id") or "")
     if not session_id or not permission_id or len(session_id) > 128 or len(permission_id) > 128:
         raise HTTPException(status_code=400, detail="invalid session or permission id")
+    safe_change_senders = {
+        agent["app_id"]: allowed
+        for agent in CFG.get("agents", [])
+        if isinstance((allowed := agent.get("allowed_open_ids")), list)
+        and all(isinstance(item, str) and item for item in allowed)
+    }
     approval = create_approval(task_id, x_device_token, session_id, permission_id,
-                               permission, str(payload.get("detail") or ""))
+                               permission, str(payload.get("detail") or ""),
+                               safe_change_senders=safe_change_senders)
     if approval is None:
         raise HTTPException(status_code=404, detail="task not found or unauthorized")
     if approval["status"] == "pending" and approval["created"]:

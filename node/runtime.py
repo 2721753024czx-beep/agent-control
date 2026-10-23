@@ -227,7 +227,7 @@ class NodeRuntime:
     def control(self, prompt, work_dir, task_id=None):
         command = prompt.strip().lower()
         if command == "/help":
-            return "可用命令：/status /skills /memory /history /trash <相对路径> /help"
+            return "可用命令：/status /skills /memory /history /trash <相对路径> /edit <相对文件>: <要求> /help"
         if command.startswith("/trash "):
             relative = prompt.strip()[7:].strip()
             manifest = move_to_trash(work_dir, relative, task_id)

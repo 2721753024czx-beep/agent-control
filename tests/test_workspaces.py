@@ -34,6 +34,20 @@ class WorkspaceTests(unittest.TestCase):
                     count = conn.execute("SELECT count(*) FROM tasks").fetchone()[0]
                 self.assertEqual(count, 0)
 
+    def test_edit_requires_sender_allowlist(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(db, "DB_PATH", Path(temp) / "test.db"):
+            db.init_db()
+            db.upsert_device("dev", "device", "secret")
+            db.upsert_agent("app", "dev", "opencode", "Agent", "serve",
+                            "http://127.0.0.1:4096", "secret", temp)
+            with patch.object(hub, "CFG", {"agents": [{"app_id": "app"}]}), patch.object(hub, "reply") as reply:
+                hub.handle_message("app", {"message_id": "edit-1", "message_type": "text",
+                                           "content": '{"text": "/edit notes.txt: revise"}'},
+                                   {"open_id": "alice"})
+            self.assertIn("已拒绝", reply.call_args.args[2])
+            with sqlite3.connect(Path(temp) / "test.db") as conn:
+                self.assertEqual(conn.execute("SELECT count(*) FROM tasks").fetchone()[0], 0)
+
     def test_sender_selection_isolated_and_task_directory_frozen(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

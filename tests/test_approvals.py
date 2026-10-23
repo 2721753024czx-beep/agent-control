@@ -35,6 +35,44 @@ class ApprovalTests(unittest.TestCase):
                 hub.request_approval("missing", {"permission": permission}, "token")
             self.assertEqual(caught.exception.status_code, 403)
 
+    def test_safe_change_requires_edit_task_and_allowlisted_sender(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(db, "DB_PATH", Path(temp) / "test.db"):
+            db.init_db()
+            db.upsert_device("pc", "PC", "token")
+            db.upsert_agent("app", "pc", "agent", "Agent", "serve", "http://127.0.0.1:4096", "secret", temp)
+            task = db.create_task("app", "pc", "/edit note.txt: revise", "msg", "chat", temp, "alice")
+            db.claim_task("pc", "token")
+            diff = "--- a/note.txt\n+++ b/note.txt\n@@ -1 +1 @@\n-old\n+new\n"
+            args = (task, "token", "session", "safe-edit-" + task, "safe_change", diff)
+            self.assertIsNone(db.create_approval(*args, safe_change_senders={"app": []}))
+            self.assertIsNone(db.create_approval(*args, safe_change_senders=None))
+            self.assertIsNone(db.create_approval(*args[:-1], "unrelated diff",
+                                                  safe_change_senders={"app": ["alice"]}))
+            approval = db.create_approval(*args, safe_change_senders={"app": ["alice"]})
+            self.assertTrue(approval["created"])
+            self.assertIsNone(db.decide_approval("app", approval["code"], "bob", "chat", "approved"))
+            self.assertEqual(db.decide_approval("app", approval["code"], "alice", "chat", "approved"), "approved")
+
+    def test_hub_safe_change_gate_requires_configured_allowlist(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(db, "DB_PATH", Path(temp) / "test.db"):
+            db.init_db()
+            db.upsert_device("pc", "PC", "token")
+            db.upsert_agent("app", "pc", "agent", "Agent", "serve", "http://127.0.0.1:4096", "secret", temp)
+            task = db.create_task("app", "pc", "/edit note.txt: revise", "msg", "chat", temp, "alice")
+            db.claim_task("pc", "token")
+            payload = {"permission": "safe_change", "session_id": "session",
+                       "permission_id": "safe-edit-" + task,
+                       "detail": "--- a/note.txt\n+++ b/note.txt\n@@ -1 +1 @@\n-old\n+new\n"}
+            with patch.object(hub, "CFG", {"agents": [{"app_id": "app"}]}):
+                with self.assertRaises(HTTPException) as caught:
+                    hub.request_approval(task, payload, "token")
+                self.assertEqual(caught.exception.status_code, 404)
+            with patch.object(hub, "CFG", {"agents": [{"app_id": "app", "allowed_open_ids": ["alice"]}]}), \
+                 patch.object(hub, "reply") as reply:
+                response = hub.request_approval(task, payload, "token")
+                self.assertIn("待审批 [safe_change]", reply.call_args.args[2])
+                self.assertEqual(db.get_approval(response["code"], "token")["detail"], payload["detail"])
+
 
 if __name__ == "__main__":
     unittest.main()

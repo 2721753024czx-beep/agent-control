@@ -4,7 +4,7 @@
 
 ## 项目结构
 
-`hub/` 接收飞书消息、排队并回复；`node/` 拉取任务、执行受限 OpenCode 并写审计；`scripts/` 放 macOS launchd 与 Windows 安装脚本；`tests/` 是单元测试，`e2e_test.py` 是隔离链路测试。设计与部署说明在 `docs/`。`hub/config.json`、`node/config.json`、数据库、日志和 `.agent-memory/` 是本机数据，不上传 GitHub。
+`hub/` 接收飞书消息、排队并回复；`node/` 拉取任务、执行受限 OpenCode 并写审计；`scripts/` 放 macOS launchd 与 Windows 安装脚本；`tests/` 是单元测试，`e2e_test.py` 是隔离链路测试。设计与部署说明在 `docs/`。`hub/config.json`、`node/config.json`、数据库、日志、`.agent-memory/`、`.agent-control-edits/` 和 `.agent-control-trash/` 是本机数据，不上传 GitHub。
 
 ## 开发与测试
 
@@ -12,7 +12,7 @@
 
 ## 风格与安全
 
-Python 使用 4 空格缩进、`snake_case` 函数与模块名；测试命名为 `tests/test_*.py`。手机普通任务必须走受限 `serve`；不得把 CLI、shell、编辑或未知工具加入远程审批白名单。清理只能走可恢复的 `/trash`，不能直接删除。
+Python 使用 4 空格缩进、`snake_case` 函数与模块名；测试命名为 `tests/test_*.py`。手机普通任务必须走受限 `serve`；不得把 CLI、shell、OpenCode 原生编辑或未知工具加入远程审批白名单。单文件修改只走 Node 的 `/edit` 草案、完整差异审批和备份；清理只走可恢复的 `/trash`，不能直接删除。
 
 ## 版本、提交与 PR
 

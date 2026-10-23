@@ -16,6 +16,8 @@
 /runtime/
 /backups/
 /.agent-memory/
+/.agent-control-edits/
+/.agent-control-trash/
 
 # Generated artifacts and local environments
 /dist/

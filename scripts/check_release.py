@@ -51,7 +51,7 @@ def live_secrets():
 def forbidden_path(path):
     name = path.as_posix()
     return (
-        name.startswith(("logs/", "history/", "runtime/", "backups/", "dist/", ".agent-memory/"))
+        name.startswith(("logs/", "history/", "runtime/", "backups/", "dist/", ".agent-memory/", ".agent-control-edits/", ".agent-control-trash/"))
         or name in {"hub/config.json", "node/config.json"}
         or name.startswith(("hub/config.json.", "node/config.json."))
         or name.startswith("hub/hub.db")
