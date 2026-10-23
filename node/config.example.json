@@ -2,6 +2,10 @@
   "hub_url": "http://100.64.1.2:8000",
   "device_id": "pc1",
   "token": "change-me-pc1-token",
+  "serve_password": "replace-with-a-random-secret-of-at-least-32-characters",
+  "serve_port": 4096,
+  "default_work_dir": "/Users/example/projects",
+  "allowed_work_dirs": ["/Users/example/projects"],
   "poll_interval": 5,
   "task_timeout": 600
 }

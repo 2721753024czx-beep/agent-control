@@ -1,6 +1,6 @@
 # Networked Agent Remote Control
 
-通过飞书手机端远程控制多台无公网 IP 电脑上的本地 AI Agent（OpenCode / Claude / Codex），只返回最终确认答案。
+通过飞书手机端远程控制无公网 IP 电脑上的本地 OpenCode Agent，查看工作目录、处理一次性审批并接收最终答案。当前受限执行链路针对 OpenCode；其他 Agent 引擎尚未完成同等级安全适配。
 
 设计文档见 `docs/design.md`，飞书应用创建与 Tailscale 组网见 `docs/phase2-setup.md`。
 
@@ -23,7 +23,7 @@ Windows 单机运行 OpenCode + 飞书请直接使用 [Windows 部署指南](doc
 │   └── config.example.json
 ├── node/                    # 节点进程（每台电脑跑一个）
 │   ├── node.py              # 轮询任务 + 上报结果
-│   ├── engines.py           # CLI / serve 两种执行引擎
+│   ├── engines.py           # 受限 serve；CLI 保留本地兼容但手机任务拒绝
 │   ├── config.json          # 部署配置（复制自 config.example.json）
 │   └── config.example.json
 └── e2e_test.py              # 本地端到端流程测试（无需飞书）
@@ -34,6 +34,7 @@ Windows 单机运行 OpenCode + 飞书请直接使用 [Windows 部署指南](doc
 ### 1. 前置准备
 - 按 `docs/phase2-setup.md` 完成：创建飞书应用、开启机器人、加权限、开**长连接模式**事件订阅、发布版本。
 - 所有设备装好 Tailscale 并登录同一账号，记下 Hub 电脑的 Tailscale IP。
+- 在每台 Node 电脑启动受密码保护的回环 OpenCode `serve`；安全规则和 macOS 启动方式见 [手机端控制设计](docs/mobile-control-design.md)。同机 Windows 安装可直接使用自动配置的安装器。
 
 ### 2. 配置 Hub（在 Hub 电脑上）
 
@@ -42,7 +43,7 @@ cd hub
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp config.example.json config.json
-# 编辑 config.json：填入飞书 App ID/Secret、设备 token、显示名、执行方式
+# 编辑 config.json：填入飞书 App ID/Secret、设备 token、显示名和本人 open_id
 python hub.py          # 监听 0.0.0.0:8000
 ```
 
@@ -53,9 +54,10 @@ python hub.py          # 监听 0.0.0.0:8000
 | `app_id` / `app_secret` | 飞书应用凭证（每个 Agent 一个应用） |
 | `device_id` | 该 Agent 归属的设备，需与 node 的 `device_id` 一致 |
 | `display_name` | **可编辑显示名**，回复时拼成 `【display_name】...` |
-| `engine_type` | `cli`：走本地命令；`serve`：走 HTTP 长驻服务 |
-| `exec_path` | `cli`：含 `{prompt}` 占位符的命令，如 `opencode run "{prompt}"`；`serve`：服务地址如 `http://127.0.0.1:4096` |
-| `work_dir` | CLI 执行的工作目录 |
+| `engine_type` | 手机任务必须为 `serve`；`cli` 会被 Node 拒绝 |
+| `exec_path` | Node 本机受保护服务地址，如 `http://127.0.0.1:4096` |
+| `work_dir` | Agent 的默认工作目录；须在 Node 的 `allowed_work_dirs` 内 |
+| `allowed_open_ids` | 可使用 `/edit` 和 `/trash` 的飞书发送者白名单；示例占位值必须替换 |
 
 启动后日志出现 `ws started for ...` 即表示与飞书的长连接已建立。
 
@@ -66,7 +68,7 @@ cd node
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp config.example.json config.json
-# 编辑 config.json：hub_url 填 Hub 的 Tailscale IP，device_id/token 与 hub 配置一致
+# 编辑 config.json：填 Hub 地址、匹配的 device_id/token、serve_password 和允许目录
 python node.py
 ```
 
@@ -98,13 +100,13 @@ python3 scripts/feishu_cli_setup.py send --profile opencode --chat-id oc_xxx --t
 ```bash
 python3 e2e_test.py
 ```
-会模拟「消息进入 → 建任务 → Node 拉取 → CLI 执行 → 上报 → 拼显示名回复」的完整链路。
+会在临时配置/数据库中模拟「消息进入 → 建任务 → Node 拉取 → 受限 serve → 上报 → 回复」，不使用真实飞书凭据。
 
 ## 说明与注意事项
 
 - **长连接收事件**：飞书事件经 WebSocket 主动推送到 Hub，无需公网回调 URL；Node 通过 Tailscale 连 Hub。
-- **会话记忆**：`engine_type: serve` 的 Agent，Hub 会持久化 `session_id`，同一 Agent 多轮对话共享会话；`cli` 模式每消息独立执行。
-- **serve 模式适配**：`node/engines.py` 中 `run_serve` 按 opencode server 的 SSE 事件解析（`message.part.updated` 收集文本、`session.idle` 判定结束）。若 opencode 版本事件格式有变，仅需调整该函数。
+- **上下文**：Node 每次任务前读取当前工作目录的 `.agent-memory` 快照。`serve` 每次新建 OpenCode session；目前不承诺跨消息的短期对话会话记忆。
+- **受限执行**：`node/engines.py` 校验 OpenCode 服务器权限，禁用危险和未知工具，轮询只读权限请求，并只允许一次性批准。`/edit` 走 Node 的单文件草案与差异审批，不开放 OpenCode 原生编辑工具。
 - **回复渲染**：最终答案以**飞书消息卡片**（`msg_type: interactive` + `lark_md`）发送，原生渲染 markdown（粗体/标题/列表/行内代码/代码块），不再显示原始 `**`/`` ` `` 字符；`【显示名】` 作为卡片标题。超长答案按段落拆成多条卡片。实现见 `hub/feishu_client.py::reply_card` 与 `hub/hub.py::reply_final`。
 - **lark-oapi SDK 兼容坑（已实测修复）**：
   - 事件注册方法名是 `register_p2_im_message_receive_v1`（**单处理器**，靠事件的 `chat_type` 区分单聊/群聊），不是 `register_p2p_im_message_receive_v1`，版本不同可能报 `AttributeError`。
