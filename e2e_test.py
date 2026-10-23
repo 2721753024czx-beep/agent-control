@@ -96,8 +96,74 @@ def main():
         events = runtime.audit.recent(10)
         assert [item["event"] for item in events][-2:] == ["task_start", "task_done"]
 
+        # Exercise a complete, isolated /edit proposal and the Feishu approval
+        # command. No real message, credential, or workspace is touched.
+        config["agents"][0]["allowed_open_ids"] = ["u1"]
+        target = temp / "note.txt"
+        target.write_text("before\n", encoding="utf-8")
+
+        def send(message_id, text, sender="u1", chat="oc_1"):
+            hubmod.handle_message("serve_test", {
+                "message_id": message_id, "chat_id": chat, "chat_type": "p2p",
+                "message_type": "text", "content": json.dumps({"text": text}),
+            }, {"open_id": sender, "sender_type": "user"})
+
+        def decide_once(task_id, decision):
+            def approval_client(session_id, permission_id, permission, item):
+                assert permission == "safe_change" and "+after" in item["patterns"][0]
+                assert target.read_text(encoding="utf-8") == "before\n"
+                opened = hubmod.request_approval(task_id, {
+                    "session_id": session_id, "permission_id": permission_id,
+                    "permission": permission, "detail": item["patterns"][0],
+                }, "tok")
+                code = opened["code"]
+                assert db.decide_approval("serve_test", code, "other", "oc_1", "approved") is None
+                assert db.decide_approval("serve_test", code, "u1", "other", "approved") is None
+                send("decision-" + task_id, "/" + decision + " " + code)
+                state = hubmod.approval_status(code, "tok")
+                assert state["status"] == ("approved" if decision == "approve" else "rejected")
+                return state["status"] == "approved"
+            return approval_client
+
+        send("edit-approve", "/edit note.txt: replace before with after")
+        edit_task, error = db.claim_task("win", "tok")
+        assert error is None and edit_task["prompt"].startswith("/edit ")
+        with patch("node.run_serve", return_value=('{"content":"after\\n"}', "ses_edit_approve")):
+            result, session_id = execute(edit_task, 30, runtime,
+                                         decide_once(edit_task["task_id"], "approve"))
+        assert target.read_text(encoding="utf-8") == "after\n"
+        assert (temp / ".agent-control-edits").is_dir()
+        hubmod.report(edit_task["task_id"], {"token": "tok", "result": result,
+                                             "session_id": session_id})
+
+        target.write_text("before\n", encoding="utf-8")
+        send("edit-reject", "/edit note.txt: replace before with after")
+        rejected_task, error = db.claim_task("win", "tok")
+        assert error is None
+        with patch("node.run_serve", return_value=('{"content":"after\\n"}', "ses_edit_reject")):
+            try:
+                execute(rejected_task, 30, runtime,
+                        decide_once(rejected_task["task_id"], "reject"))
+            except PermissionError as exc:
+                hubmod.report(rejected_task["task_id"], {"token": "tok", "error": str(exc)})
+            else:
+                raise AssertionError("rejected edit was applied")
+        assert target.read_text(encoding="utf-8") == "before\n"
+
+        send("trash-recoverable", "/trash note.txt")
+        trash_task, error = db.claim_task("win", "tok")
+        assert error is None
+        trash_result, _ = execute(trash_task, 30, runtime)
+        assert "可恢复暂存目录" in trash_result and not target.exists()
+        manifests = list((temp / ".agent-control-trash").glob("*/manifest.json"))
+        assert len(manifests) == 1
+        manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
+        assert manifest["original"] == "note.txt"
+        assert (temp / manifest["stored"]).read_text(encoding="utf-8") == "before\n"
+        hubmod.report(trash_task["task_id"], {"token": "tok", "result": trash_result})
+
     assert digest(REAL_CONFIG) == before, "real hub/config.json was modified"
-    print("E2E HUB -> NODE -> ISOLATED SERVE FIXTURE -> REPLY OK")
+    print("E2E HUB -> NODE -> SERVE -> APPROVE/REJECT -> RECOVERABLE TRASH -> REPLY OK")
 
 
 if __name__ == "__main__":
