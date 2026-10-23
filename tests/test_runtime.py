@@ -29,6 +29,19 @@ class RuntimeTests(unittest.TestCase):
         self.assertLess(text.index("index.md"), text.index("requirements.md"))
         self.assertLess(text.index("requirements.md"), text.index("context.md"))
 
+    def test_prompt_uses_injected_memory_without_requiring_duplicate_reads(self):
+        memory = self.root / ".agent-memory"
+        memory.mkdir()
+        (memory / "index.md").write_text("project overview", encoding="utf-8")
+        runtime = NodeRuntime({"history_dir": str(self.root / "history")}, self.root)
+        prompt = runtime.prepare_prompt("读取 VERSION", str(self.root))
+        self.assertIn("project overview", prompt)
+        self.assertIn("不要为重复确认而再次读取这些文件", prompt)
+        self.assertIn("若快照缺少任务必需的信息", prompt)
+        self.assertIn("纯查询任务无需产生记忆更新", prompt)
+        self.assertIn("不要声称已回写", prompt)
+        self.assertIn("最终只答复用户问题", prompt)
+
     def test_skill_listing(self):
         skill = self.root / ".agents" / "skills" / "demo"
         skill.mkdir(parents=True)
