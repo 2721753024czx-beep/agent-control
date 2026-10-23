@@ -7,7 +7,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "node"))
-from engines import run_serve  # noqa: E402
+from engines import _extract_text, run_serve  # noqa: E402
+from safe_edit import parse_proposal  # noqa: E402
 
 
 class FakeResponse:
@@ -25,6 +26,16 @@ class FakeResponse:
 
 
 class ServeApprovalTests(unittest.TestCase):
+    def test_only_visible_text_parts_are_returned(self):
+        parts = [
+            {"type": "step-start", "text": "internal step"},
+            {"type": "reasoning", "text": "private reasoning"},
+            {"type": "text", "text": '{"content":"beta\\n"}'},
+            {"type": "step-finish", "text": "internal finish"},
+        ]
+        self.assertEqual(_extract_text(parts), '{"content":"beta\\n"}')
+        self.assertEqual(parse_proposal(_extract_text(parts)), "beta\n")
+
     def test_read_approval_once_with_mutating_tools_disabled(self):
         requests = []
         rounds = {"count": 0}
@@ -58,7 +69,8 @@ class ServeApprovalTests(unittest.TestCase):
                 return FakeResponse({} if rounds["count"] >= 2 else {"ses_test": {"type": "busy"}})
             if path.endswith("/message"):
                 return FakeResponse([{"info": {"role": "assistant"},
-                                      "parts": [{"type": "text", "text": "done"}]}])
+                                      "parts": [{"type": "reasoning", "text": "hidden"},
+                                                {"type": "text", "text": "done"}]}])
             raise AssertionError(path)
 
         approvals = []

@@ -58,11 +58,8 @@ def _extract_text(content):
     if isinstance(content, list):
         out = []
         for item in content:
-            if isinstance(item, dict):
-                if item.get("type") == "text":
-                    out.append(item.get("text", ""))
-                elif item.get("text"):
-                    out.append(item["text"])
+            if isinstance(item, dict) and item.get("type") == "text":
+                out.append(item.get("text", ""))
         return "".join(out)
     return ""
 
