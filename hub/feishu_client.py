@@ -1,3 +1,5 @@
+import asyncio
+import importlib
 import json
 import logging
 import threading
@@ -10,6 +12,21 @@ from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
 from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTriggerResponse
 
 log = logging.getLogger("feishu")
+
+# The SDK stores its event loop at module scope. All clients must share one
+# runner; calling Client.start() in multiple threads races run_until_complete.
+_sdk_runner_lock = threading.Lock()
+_sdk_runner = None
+
+
+def _ws_loop():
+    global _sdk_runner
+    sdk = importlib.import_module("lark_oapi.ws.client")
+    with _sdk_runner_lock:
+        if _sdk_runner is None or not _sdk_runner.is_alive():
+            _sdk_runner = threading.Thread(target=sdk.loop.run_forever, daemon=True)
+            _sdk_runner.start()
+    return sdk.loop
 
 
 def approval_card(permission, detail, code):
@@ -87,8 +104,22 @@ class FeishuClient:
             event_handler=handler,
             log_level=lark.LogLevel.INFO,
         )
-        self._thread = threading.Thread(target=self._ws.start, daemon=True)
-        self._thread.start()
+        async def connect():
+            try:
+                await self._ws._connect()
+            except Exception:
+                await self._ws._disconnect()
+                if not self._ws._auto_reconnect:
+                    raise
+                await self._ws._reconnect()
+            self._ping_task = asyncio.create_task(self._ws._ping_loop())
+
+        self._future = asyncio.run_coroutine_threadsafe(connect(), _ws_loop())
+
+        def connected(future):
+            if not future.cancelled() and future.exception() is not None:
+                log.error("robot websocket startup failed for app %s", self.app_id)
+        self._future.add_done_callback(connected)
 
     def _dispatch(self, data, callback):
         try:
@@ -217,7 +248,9 @@ class FeishuClient:
 
     def stop(self):
         if self._ws:
-            try:
-                self._ws.close()
-            except Exception:
-                pass
+            async def disconnect():
+                self._ws._auto_reconnect = False
+                if getattr(self, "_ping_task", None):
+                    self._ping_task.cancel()
+                await self._ws._disconnect()
+            asyncio.run_coroutine_threadsafe(disconnect(), _ws_loop())
