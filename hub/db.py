@@ -3,6 +3,8 @@ import threading
 import uuid
 import os
 import re
+import hashlib
+import time
 from pathlib import Path
 
 DB_PATH = Path(os.environ.get("AGENT_CONTROL_DB", Path(__file__).parent / "hub.db"))
@@ -77,6 +79,18 @@ CREATE TABLE IF NOT EXISTS approvals (
     created_at TEXT DEFAULT (datetime('now')),
     UNIQUE (task_id, session_id, permission_id)
 );
+CREATE TABLE IF NOT EXISTS attachments (
+    id TEXT PRIMARY KEY,
+    app_id TEXT NOT NULL,
+    sender_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    work_dir TEXT NOT NULL,
+    name TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    data BLOB NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL
+);
 """
 
 
@@ -97,6 +111,9 @@ def init_db():
                 conn.execute("ALTER TABLE tasks ADD COLUMN work_dir TEXT")
             if "sender_open_id" not in columns:
                 conn.execute("ALTER TABLE tasks ADD COLUMN sender_open_id TEXT")
+            for name, kind in (("attachment_id", "TEXT"), ("attachment_receive", "INTEGER DEFAULT 0")):
+                if name not in columns:
+                    conn.execute("ALTER TABLE tasks ADD COLUMN %s %s" % (name, kind))
             approval_columns = {row[1] for row in conn.execute("PRAGMA table_info(approvals)")}
             if "card_message_id" not in approval_columns:
                 conn.execute("ALTER TABLE approvals ADD COLUMN card_message_id TEXT")
@@ -186,9 +203,10 @@ def mark_message_processed(app_id, message_id):
     with _lock:
         conn = _connect()
         try:
-            conn.execute(
+            changed = conn.execute(
                 "INSERT OR IGNORE INTO processed_messages (app_id, message_id) VALUES (?,?)",
                 (app_id, message_id))
+            return changed.rowcount == 1
         finally:
             conn.close()
 
@@ -221,7 +239,7 @@ def set_workspace_selection(app_id, sender_open_id, alias):
 
 
 def create_task(app_id, device_id, prompt, reply_message_id=None, reply_chat_id=None,
-                work_dir=None, sender_open_id=None):
+                work_dir=None, sender_open_id=None, attachment_id=None, attachment_receive=False):
     task_id = "t_" + uuid.uuid4().hex[:12]
     with _lock:
         conn = _connect()
@@ -229,13 +247,74 @@ def create_task(app_id, device_id, prompt, reply_message_id=None, reply_chat_id=
             conn.execute(
                 """INSERT INTO tasks (task_id, app_id, device_id, prompt,
                                       reply_message_id, reply_chat_id, work_dir,
-                                      sender_open_id)
-                   VALUES (?,?,?,?,?,?,?,?)""",
+                                      sender_open_id, attachment_id, attachment_receive)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (task_id, app_id, device_id, prompt, reply_message_id, reply_chat_id,
-                 work_dir, sender_open_id))
+                 work_dir, sender_open_id, attachment_id, int(attachment_receive)))
         finally:
             conn.close()
     return task_id
+
+
+def store_attachment(app_id, sender_id, chat_id, work_dir, name, data):
+    if not sender_id or not chat_id or not data.startswith(b"%PDF-") or len(data) > 10 * 1024 * 1024:
+        raise ValueError("仅支持不超过 10 MiB 的 PDF")
+    ident = uuid.uuid4().hex
+    with _lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            used = conn.execute("SELECT coalesce(sum(length(data)),0) FROM attachments").fetchone()[0]
+            if used + len(data) > 200 * 1024 * 1024:
+                raise ValueError("附件存储已达 200 MiB，请在电脑端归档清理后再上传")
+            conn.execute("UPDATE attachments SET active=0 WHERE app_id=? AND sender_id=? AND chat_id=? AND work_dir=?",
+                         (app_id, sender_id, chat_id, work_dir))
+            conn.execute("INSERT INTO attachments VALUES (?,?,?,?,?,?,?,?,?,?)",
+                         (ident, app_id, sender_id, chat_id, work_dir, name,
+                          hashlib.sha256(data).hexdigest(), data, 1, int(time.time())))
+            conn.execute("COMMIT")
+        except Exception:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
+    return ident
+
+
+def current_attachment(app_id, sender_id, chat_id, work_dir, clear=False):
+    with _lock:
+        conn = _connect()
+        try:
+            scope = (app_id, sender_id, chat_id, work_dir)
+            if clear:
+                conn.execute("UPDATE attachments SET active=0 WHERE app_id=? AND sender_id=? AND chat_id=? AND work_dir=?", scope)
+                return None
+            row = conn.execute("""SELECT id,name FROM attachments WHERE app_id=? AND sender_id=?
+                AND chat_id=? AND work_dir=? AND active=1 AND created_at>? ORDER BY rowid DESC LIMIT 1""",
+                               scope + (int(time.time()) - 86400,)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+
+def task_attachment(task_id, token, include_data=False):
+    """Only the assigned device may fetch a running task's frozen attachment."""
+    with _lock:
+        conn = _connect()
+        try:
+            fields = "a.id,a.name,a.sha256" + (",a.data" if include_data else "")
+            row = conn.execute("""SELECT """ + fields + """ FROM attachments a
+                JOIN tasks t ON t.attachment_id=a.id JOIN devices d ON d.device_id=t.device_id
+                WHERE t.task_id=? AND d.token=? AND t.status='running'
+                AND a.app_id=t.app_id AND a.sender_id=t.sender_open_id
+                AND a.chat_id=t.reply_chat_id AND a.work_dir=t.work_dir""", (task_id, token)).fetchone()
+            if not row:
+                return None
+            result = dict(row)
+            return result
+        finally:
+            conn.close()
 
 
 def create_approval(task_id, token, session_id, permission_id, permission, detail,
@@ -379,8 +458,15 @@ def claim_task(device_id, token):
                 (row["task_id"],))
             agent = conn.execute("SELECT * FROM agents WHERE app_id=?",
                                  (row["app_id"],)).fetchone()
-            conn.execute("COMMIT")
             task = dict(row)
+            if row["attachment_id"]:
+                attachment = conn.execute("""SELECT id,name,sha256 FROM attachments
+                    WHERE id=? AND app_id=? AND sender_id=? AND chat_id=? AND work_dir=?""",
+                    (row["attachment_id"], row["app_id"], row["sender_open_id"],
+                     row["reply_chat_id"], row["work_dir"])).fetchone()
+                if attachment is None:
+                    raise ValueError("attachment scope mismatch")
+                task["attachment"] = dict(attachment)
             task["engine"] = {
                 "type": agent["engine_type"],
                 "command": agent["exec_path"],
@@ -388,6 +474,7 @@ def claim_task(device_id, token):
                 "base_url": agent["exec_path"],
                 "session_id": agent["session_id"],
             }
+            conn.execute("COMMIT")
             return task, None
         except Exception:
             conn.execute("ROLLBACK")

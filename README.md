@@ -6,6 +6,8 @@
 
 Windows 单机运行 OpenCode + 飞书请直接使用 [Windows 部署指南](docs/windows-opencode-feishu.md) 和 `scripts/windows/install.ps1`。Hub 与 Node 同机时不需要 Tailscale。
 
+支持发送 PDF 文件后再发送文字处理要求；文字提取、扫描页 OCR 安装与限制见 [PDF 附件指南](docs/pdf-attachments.md)。
+
 ## 目录结构
 
 ```

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Isolated Hub -> Node -> reply test. Never touches real config or database."""
 import hashlib
+import io
 import json
 import os
 import sys
@@ -162,8 +163,39 @@ def main():
         assert (temp / manifest["stored"]).read_text(encoding="utf-8") == "before\n"
         hubmod.report(trash_task["task_id"], {"token": "tok", "result": trash_result})
 
+        # Attachment receive -> task-scoped transfer -> real PDF extraction ->
+        # subsequent model prompt. All bytes/config remain in the temp workspace.
+        import fitz
+        with fitz.open() as document:
+            document.new_page().insert_text((60, 80), "ISOLATED PDF CONTENT FOR SUMMARY")
+            pdf_data = document.tobytes()
+        fake.download_pdf = lambda message_id, key: pdf_data
+        hubmod.handle_message("serve_test", {
+            "message_id": "pdf-upload", "chat_id": "oc_1", "message_type": "file",
+            "content": json.dumps({"file_name": "fixture.pdf", "file_key": "fixture"}),
+        }, {"open_id": "u1"})
+        pdf_task, error = db.claim_task("win", "tok")
+        assert not error and pdf_task["attachment_receive"]
+        runtime.config.update({"hub_url": "http://127.0.0.1:8000", "token": "tok"})
+        raw = hubmod.download_attachment(pdf_task["task_id"], "tok").body
+        with patch("urllib.request.urlopen", return_value=io.BytesIO(raw)):
+            result, _ = execute(pdf_task, 30, runtime)
+        assert "文字提取完成" in result
+        hubmod.report(pdf_task["task_id"], {"token": "tok", "result": result})
+        send("pdf-summary", "summarize this document")
+        pdf_followup, error = db.claim_task("win", "tok")
+        assert not error and pdf_followup["attachment"]["id"] == pdf_task["attachment"]["id"]
+        def summarize(engine, prompt, timeout, approval):
+            assert "ISOLATED PDF CONTENT FOR SUMMARY" in prompt
+            assert "不可信资料" in prompt
+            return "PDF SUMMARY OK", "pdf-session"
+        with patch("node.run_serve", side_effect=summarize):
+            result, _ = execute(pdf_followup, 30, runtime)
+        hubmod.report(pdf_followup["task_id"], {"token": "tok", "result": result})
+        assert fake.replies[-1][-1] == "PDF SUMMARY OK"
+
     assert digest(REAL_CONFIG) == before, "real hub/config.json was modified"
-    print("E2E HUB -> NODE -> SERVE -> APPROVE/REJECT -> RECOVERABLE TRASH -> REPLY OK")
+    print("E2E HUB -> NODE -> SERVE -> APPROVE/REJECT -> RECOVERABLE TRASH -> PDF -> REPLY OK")
 
 
 if __name__ == "__main__":

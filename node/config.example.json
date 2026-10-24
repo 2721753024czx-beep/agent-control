@@ -7,5 +7,6 @@
   "default_work_dir": "/Users/example/projects",
   "allowed_work_dirs": ["/Users/example/projects"],
   "poll_interval": 5,
-  "task_timeout": 600
+  "task_timeout": 600,
+  "pdf": {"ocr": true, "language": "eng+chi_sim", "tessdata": null}
 }

@@ -4,7 +4,7 @@
 
 ## 项目结构
 
-`hub/` 接收飞书消息、排队并回复；`node/` 拉取任务、执行受限 OpenCode 并写审计；`scripts/` 放 macOS launchd 与 Windows 安装脚本；`tests/` 是单元测试，`e2e_test.py` 是隔离链路测试。设计与部署说明在 `docs/`。`hub/config.json`、`node/config.json`、数据库、日志、`.agent-memory/`、`.agent-control-edits/` 和 `.agent-control-trash/` 是本机数据，不上传 GitHub。
+`hub/` 接收飞书消息、排队并回复；`node/` 拉取任务、执行受限 OpenCode 并写审计；`scripts/` 放 macOS launchd 与 Windows 安装脚本；`tests/` 是单元测试，`e2e_test.py` 是隔离链路测试。设计与部署说明在 `docs/`。`hub/config.json`、`node/config.json`、数据库、日志、`.agent-memory/`、`.agent-control-edits/`、`.agent-control-trash/` 和 `.agent-control-files/` 是本机数据，不上传 GitHub。
 
 ## 开发与测试
 

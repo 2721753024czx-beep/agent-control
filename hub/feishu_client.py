@@ -1,6 +1,9 @@
 import json
 import logging
 import threading
+import time
+from urllib.parse import quote
+import requests
 
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
@@ -61,6 +64,7 @@ class FeishuClient:
             .build()
         self._ws = None
         self._thread = None
+        self._file_slots = threading.BoundedSemaphore(2)
 
     def _build_handler(self, on_message, on_card_action=None):
         builder = (lark.EventDispatcherHandler.builder("", "")
@@ -99,7 +103,20 @@ class FeishuClient:
                 "open_id": data.event.sender.sender_id.open_id,
                 "sender_type": data.event.sender.sender_type,
             }
-            callback(message, sender)
+            if message["message_type"] == "file":
+                if not self._file_slots.acquire(blocking=False):
+                    self.reply(message["message_id"], "附件接收繁忙，请稍后重发 PDF。")
+                    return
+                def receive():
+                    try:
+                        callback(message, sender)
+                    except Exception:
+                        log.exception("file dispatch error")
+                    finally:
+                        self._file_slots.release()
+                threading.Thread(target=receive, daemon=True).start()
+            else:
+                callback(message, sender)
         except Exception:
             log.exception("dispatch error")
 
@@ -136,6 +153,32 @@ class FeishuClient:
         resp = self.api.im.v1.message.reply(req)
         if not resp.success():
             raise RuntimeError(f"reply failed code={resp.code} msg={resp.msg}")
+
+    def download_pdf(self, message_id, file_key):
+        # Stream rather than SDK's fully buffered resource response: enforce the
+        # application limit even if the message's declared size is incorrect.
+        with requests.post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                           json={"app_id": self.app_id, "app_secret": self.app_secret},
+                           timeout=15, allow_redirects=False) as response:
+            auth = response.json()
+        token = auth.get("tenant_access_token")
+        if auth.get("code") != 0 or not isinstance(token, str) or not token:
+            raise RuntimeError("飞书附件认证失败，请检查应用配置")
+        url = "https://open.feishu.cn/open-apis/im/v1/messages/%s/resources/%s" % (
+            quote(message_id, safe=""), quote(file_key, safe=""))
+        data = bytearray()
+        deadline = time.monotonic() + 45
+        with requests.get(url, params={"type": "file"}, headers={"Authorization": "Bearer " + token},
+                          stream=True, timeout=15, allow_redirects=False) as response:
+            if response.status_code != 200:
+                raise RuntimeError("飞书附件下载失败 HTTP %d；请检查消息资源权限与文件有效性" % response.status_code)
+            for chunk in response.iter_content(65536):
+                data.extend(chunk)
+                if len(data) > 10 * 1024 * 1024 or time.monotonic() > deadline:
+                    raise ValueError("PDF 超过 10 MiB 或下载超时，请拆分后重发")
+        if not data.startswith(b"%PDF-") or len(data) > 10 * 1024 * 1024:
+            raise ValueError("仅支持不超过 10 MiB 的 PDF 文件")
+        return bytes(data)
 
     def reply_card(self, message_id, title, text, template="blue"):
         card = {

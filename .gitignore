@@ -18,6 +18,7 @@
 /.agent-memory/
 /.agent-control-edits/
 /.agent-control-trash/
+/.agent-control-files/
 
 # Generated artifacts and local environments
 /dist/

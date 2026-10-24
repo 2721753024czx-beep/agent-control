@@ -10,6 +10,7 @@ from pathlib import Path
 from engines import run_cli, run_serve
 from runtime import NodeRuntime
 from safe_edit import snapshot, parse_proposal, preview, apply_approved
+from pdf_attachments import prepare as prepare_pdf, context as pdf_context
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("node")
@@ -40,6 +41,7 @@ def http_json(method, url, payload=None, timeout=30, headers=None):
 def execute(task, timeout, runtime=None, approval_client=None):
     engine = task["engine"]
     edit_change = None
+    pdf = None
     if runtime:
         engine = dict(engine)
         engine["work_dir"] = runtime.validate_work_dir(engine.get("work_dir"))
@@ -53,6 +55,19 @@ def execute(task, timeout, runtime=None, approval_client=None):
             runtime.audit.append("safety_block", task_id=task["task_id"],
                                  reason="unrestricted CLI engine")
             raise PermissionError("手机普通任务需要受限 serve 模式；CLI 模式已拒绝执行")
+        if task.get("attachment"):
+            item, parsed, source = prepare_pdf(task, engine["work_dir"], runtime.config)
+            pdf = pdf_context(item, parsed)
+            runtime.audit.append("pdf_extracted", task_id=task["task_id"],
+                                 attachment_id=item["id"], pages=parsed["pages"],
+                                 warnings=len(parsed["warnings"]))
+            if task.get("attachment_receive"):
+                warnings = "\n".join(parsed["warnings"])
+                return ("已接收 PDF：%s（%d 页）\n电脑保存：%s\n%s\n"
+                        "请发送处理要求；接下来 24 小时内同一聊天、用户和工作区的普通文字任务会引用此 PDF。"
+                        "发送 /pdf clear 可取消关联。" %
+                        (item["name"], parsed["pages"], source,
+                         warnings or "文字提取完成（不调用模型）。")), None
         if task["prompt"].strip().lower().startswith("/edit"):
             match = re.fullmatch(r"/edit ([^:\r\n]+):\s*(.+)", task["prompt"].strip(), re.DOTALL)
             if not match:
@@ -64,6 +79,8 @@ def execute(task, timeout, runtime=None, approval_client=None):
             raise RuntimeError("预算保护已阻止执行：" + reason)
         runtime.budget.start()
         prompt = runtime.prepare_prompt(task["prompt"], engine.get("work_dir"))
+        if pdf:
+            prompt += pdf
         if edit_change is not None:
             prompt += (
                 "\n[受控编辑任务]\n只生成指定文件的完整新文本，不调用编辑/写入/shell工具。"

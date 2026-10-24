@@ -12,6 +12,7 @@
   "history_dir": "C:/agent-control/history",
   "budget_state_path": "C:/agent-control/runtime/budget.json",
   "shared_memory_max_chars": 12000,
+  "pdf": {"ocr": true, "language": "eng+chi_sim", "tessdata": null},
   "budget": {
     "max_tasks_per_day": 40,
     "max_runtime_seconds_per_day": 7200,

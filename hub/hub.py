@@ -9,6 +9,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import Response
 
 from db import (
     claim_task, create_task, create_approval, decide_approval, get_approval,
@@ -16,6 +17,7 @@ from db import (
     get_workspace_selection, set_workspace_selection,
     mark_message_processed, mark_timeout_tasks, message_seen,
     report_task, set_approval_card_message, set_display_name, upsert_agent, upsert_device,
+    store_attachment, current_attachment, task_attachment,
 )
 from feishu_client import FeishuClient
 
@@ -87,9 +89,8 @@ def reply_final(app_id, message_id, title, text, template="blue"):
 
 def handle_message(app_id, message, sender):
     msg_id = message.get("message_id") or ""
-    if not msg_id or message_seen(app_id, msg_id):
+    if not msg_id or not mark_message_processed(app_id, msg_id):
         return
-    mark_message_processed(app_id, msg_id)
 
     agent = get_agent(app_id)
     if agent is None or not agent["enabled"]:
@@ -105,17 +106,18 @@ def handle_message(app_id, message, sender):
         log.warning("sender not allowed for app_id=%s", app_id)
         return
 
-    if message.get("message_type") != "text":
-        reply(app_id, msg_id, "【%s】目前只支持文本消息。" % agent["display_name"])
+    is_file = message.get("message_type") == "file"
+    if message.get("message_type") not in {"text", "file"}:
+        reply(app_id, msg_id, "【%s】目前支持文本消息和 PDF 文件附件。" % agent["display_name"])
         return
 
     try:
         content = json.loads(message.get("content") or "{}")
-        text = str(content.get("text", "")).strip()
+        text = "" if is_file else str(content.get("text", "")).strip()
     except Exception:
         text = str(message.get("content", "")).strip()
     text = strip_mention(text)
-    if not text:
+    if not text and not is_file:
         return
     if text.lower().startswith(("/trash", "/edit")) and (not valid_allowlist or not allowed_senders):
         reply(app_id, msg_id, "电脑端尚未配置 allowed_open_ids，/trash 与 /edit 已拒绝。")
@@ -172,9 +174,38 @@ def handle_message(app_id, message, sender):
         reply(app_id, msg_id, "工作目录未配置，任务未启动。")
         return
 
+    attachment_id = None
+    if is_file:
+        if not valid_allowlist or not allowed_senders or not sender_id or not message.get("chat_id"):
+            reply(app_id, msg_id, "电脑端须配置 allowed_open_ids 后才能接收 PDF。")
+            return
+        try:
+            name = content.get("file_name")
+            key = content.get("file_key")
+            if (not isinstance(name, str) or len(name) > 180 or not name.lower().endswith(".pdf")
+                    or any(ord(c) < 32 for c in name) or not isinstance(key, str) or len(key) > 300):
+                raise ValueError("请发送名称有效的 PDF 文件，单文件上限 10 MiB")
+            if int(content.get("file_size") or 0) > 10 * 1024 * 1024:
+                raise ValueError("PDF 超过 10 MiB 限制")
+            data = FEISHU_CLIENTS[app_id].download_pdf(msg_id, key)
+            attachment_id = store_attachment(app_id, sender_id, message["chat_id"], selected_dir, name, data)
+            text = "接收并提取 PDF"
+        except Exception as exc:
+            log.warning("PDF receive failed: %s", type(exc).__name__)
+            reply(app_id, msg_id, "PDF 接收失败：" + (str(exc) if isinstance(exc, (ValueError, RuntimeError)) else "下载暂不可用，请稍后重发"))
+            return
+    elif text == "/pdf clear":
+        current_attachment(app_id, sender_id, message.get("chat_id") or "", selected_dir, clear=True)
+        reply(app_id, msg_id, "已取消当前 PDF 关联，文件与已有任务保留。")
+        return
+    elif not text.startswith("/"):
+        attachment = current_attachment(app_id, sender_id, message.get("chat_id") or "", selected_dir)
+        attachment_id = attachment["id"] if attachment else None
+
     task_id = create_task(app_id, agent["device_id"], text, msg_id,
                           message.get("chat_id"), work_dir=selected_dir,
-                          sender_open_id=sender_id)
+                          sender_open_id=sender_id, attachment_id=attachment_id,
+                          attachment_receive=is_file)
     log.info("task %s queued for %s", task_id, agent["device_id"])
     reply(app_id, msg_id,
           "【%s】收到，正在处理（task=%s）…" % (agent["display_name"], task_id))
@@ -268,6 +299,15 @@ def pull_tasks(device_id: str, token: str = None,
     if err:
         raise HTTPException(status_code=401, detail=err)
     return {"task": task}
+
+
+@app.get("/tasks/{task_id}/attachment")
+def download_attachment(task_id: str, x_device_token: str = Header(default=None)):
+    attachment = task_attachment(task_id, x_device_token, include_data=True)
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="attachment not found or unauthorized")
+    return Response(content=attachment["data"], media_type="application/pdf",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.post("/tasks/{task_id}/approvals")

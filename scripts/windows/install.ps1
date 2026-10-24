@@ -6,6 +6,7 @@ param(
     [string]$DeviceId = "windows-opencode",
     [switch]$ConfirmExclusiveFeishuApp,
     [switch]$SkipLarkCliBind,
+    [switch]$InstallPdfOcr,
     [switch]$SkipOpenCodeSmokeTest
 )
 
@@ -86,6 +87,15 @@ $VenvPython = Join-Path $Root ".venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPython)) { & $Python -m venv (Join-Path $Root ".venv") }
 & $VenvPython -m pip install --upgrade pip
 & $VenvPython -m pip install -r (Join-Path $Root "hub\requirements.txt")
+& $VenvPython -m pip install -r (Join-Path $Root "node\requirements.txt")
+if ($LASTEXITCODE -ne 0) { throw "Node 依赖安装失败" }
+if ($InstallPdfOcr) {
+    $OcrDataDir = Join-Path $Root "runtime\tessdata"
+    New-Item -ItemType Directory -Force -Path $OcrDataDir | Out-Null
+    foreach ($Language in @("eng", "chi_sim")) {
+        Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/$Language.traineddata" -OutFile (Join-Path $OcrDataDir "$Language.traineddata") -TimeoutSec 120
+    }
+}
 & $VenvPython -m unittest discover -s (Join-Path $Root "tests") -v
 & $VenvPython (Join-Path $Root "e2e_test.py")
 
