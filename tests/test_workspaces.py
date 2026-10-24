@@ -60,7 +60,8 @@ class WorkspaceTests(unittest.TestCase):
                 db.upsert_device("dev", "device", "secret")
                 db.upsert_agent("app", "dev", "opencode", "Agent", "cli", "echo {prompt}",
                                 "secret", str(first))
-                with patch.object(hub, "CFG", {"agents": [{"app_id": "app", "workspaces": {
+                with patch.object(hub, "CFG", {"agents": [{"app_id": "app", "access_mode": "shared",
+                        "owner_open_id": "alice", "allowed_open_ids": ["alice", "bob"], "workspaces": {
                         "first": str(first), "second": str(second)}}]}), \
                      patch.object(hub, "reply"):
                     def send(mid, sender, text):

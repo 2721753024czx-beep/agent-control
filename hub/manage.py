@@ -19,7 +19,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from db import (  # noqa: E402
     _connect, init_db, list_agents, set_display_name,
     upsert_agent, upsert_device,
+    release_device_execution,
 )
+from access import validate_agents
 
 AGENT_KEYS = ("app_id", "device_id", "agent_name", "display_name", "engine_type",
               "exec_path", "app_secret", "work_dir", "session_id", "enabled")
@@ -60,11 +62,25 @@ def cmd_add_agent(args):
 def cmd_seed(args):
     with open(args.config, encoding="utf-8") as f:
         cfg = json.load(f)
+    validate_agents([a for a in cfg.get("agents", []) if a.get("enabled", 1)])
     for d in cfg.get("devices", []):
         upsert_device(d["device_id"], d["name"], d["token"])
     for a in cfg.get("agents", []):
         upsert_agent(**_agent_kwargs(a))
     print("seeded %d agents" % len(cfg.get("agents", [])))
+
+
+def cmd_validate(args):
+    with open(args.config, encoding="utf-8") as handle:
+        cfg = json.load(handle)
+    validate_agents([a for a in cfg.get("agents", []) if a.get("enabled", 1)])
+    print("ACCESS_CONFIG_OK agents=%d" % len(cfg.get("agents", [])))
+
+
+def cmd_release(args):
+    if not args.confirm_worker_stopped:
+        raise SystemExit("须先停止 Node 和其 OpenCode 服务，再传 --confirm-worker-stopped；不能用于抢占运行任务")
+    print("released reservations=%d" % release_device_execution(args.device_id))
 
 
 def cmd_tasks(args):
@@ -83,12 +99,18 @@ def cmd_tasks(args):
 
 
 def main():
-    init_db()
     parser = argparse.ArgumentParser(description="Hub 运行时管理工具")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("agents", help="列出所有 Agent").set_defaults(func=cmd_agents)
     sub.add_parser("devices", help="列出设备").set_defaults(func=cmd_devices)
+    p_validate = sub.add_parser("validate-config", help="检查个人/团队权限与目录隔离")
+    p_validate.add_argument("--config", default=str(Path(__file__).with_name("config.json")))
+    p_validate.set_defaults(func=cmd_validate)
+    p_release = sub.add_parser("release-device", help="执行器已停止后由本机管理员恢复占用")
+    p_release.add_argument("device_id")
+    p_release.add_argument("--confirm-worker-stopped", action="store_true")
+    p_release.set_defaults(func=cmd_release)
 
     p_rename = sub.add_parser("rename", help="改显示名（即时生效）")
     p_rename.add_argument("app_id")
@@ -109,6 +131,8 @@ def main():
     p_tasks.set_defaults(func=cmd_tasks)
 
     args = parser.parse_args()
+    if args.cmd != "validate-config":
+        init_db()
     args.func(args)
 
 

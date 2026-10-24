@@ -2,6 +2,7 @@
 param(
     [string]$WorkDir = "",
     [string]$AppId = "",
+    [string]$OwnerOpenId = "",
     [string]$DisplayName = "Windows-OpenCode",
     [string]$DeviceId = "windows-opencode",
     [switch]$ConfirmExclusiveFeishuApp,
@@ -72,6 +73,8 @@ if (-not $SkipOpenCodeSmokeTest) {
     }
 }
 if (-not $AppId) { $AppId = Read-Host "飞书应用 App ID（cli_...）" }
+if (-not $OwnerOpenId) { $OwnerOpenId = Read-Host "个人 Agent 所有者 Open ID（ou_...，从可信飞书身份信息获取）" }
+if ($OwnerOpenId -notmatch '^ou_[A-Za-z0-9_-]+$') { throw "OwnerOpenId 格式无效" }
 if (-not $ConfirmExclusiveFeishuApp) {
     Write-Host "同一个飞书应用不能同时由旧 Mac Hub 和 Windows Hub 消费长连接事件。" -ForegroundColor Yellow
     $ExclusiveAnswer = Read-Host "确认该 App ID 只由本 Windows Hub 使用（已停止旧 Hub，或这是独立应用）。请输入 WINDOWS"
@@ -119,6 +122,9 @@ $HubConfig = @{
         exec_path = "http://127.0.0.1:4096"
         work_dir = $WorkDirJsonPath
         app_secret = $AppSecret
+        access_mode = "personal"
+        owner_open_id = $OwnerOpenId
+        allowed_open_ids = @($OwnerOpenId)
     })
 }
 $NodeConfig = @{

@@ -45,6 +45,16 @@ def execute(task, timeout, runtime=None, approval_client=None):
     if runtime:
         engine = dict(engine)
         engine["work_dir"] = runtime.validate_work_dir(engine.get("work_dir"))
+        per_agent = runtime.config.get("agent_work_dirs")
+        if per_agent is not None:
+            roots = per_agent.get(task.get("app_id"), [])
+            if engine["work_dir"] not in {str(Path(root).resolve(strict=True)) for root in roots}:
+                raise PermissionError("当前 Agent 无权使用此工作目录")
+        if task.get("actor_role", "editor") not in {"reader", "editor"}:
+            raise PermissionError("无效的任务角色")
+        if (task.get("actor_role", "editor") != "editor"
+                and task["prompt"].strip().lower().startswith(("/edit", "/trash"))):
+            raise PermissionError("只读成员不能修改或清理文件")
         engine["serve_password"] = runtime.config.get("serve_password")
         control_result = runtime.control(task["prompt"], engine.get("work_dir"), task["task_id"])
         if control_result is not None:
@@ -181,12 +191,23 @@ def main():
 
                 result, session_id = execute(task, timeout, runtime, approval_client)
                 report = {"token": token, "result": result, "session_id": session_id}
-                http_json("POST", "%s/tasks/%s/report" % (hub, task["task_id"]), report)
-                log.info("reported %s done", task["task_id"])
             except Exception as e:
                 log.exception("exec failed")
                 report = {"token": token, "error": str(e)[:2000]}
-                http_json("POST", "%s/tasks/%s/report" % (hub, task["task_id"]), report)
+            # Do not abandon an execution reservation on a transient network
+            # error, or execute the task again while retrying its final report.
+            while True:
+                try:
+                    http_json("POST", "%s/tasks/%s/report" % (hub, task["task_id"]), report)
+                    log.info("reported %s", task["task_id"])
+                    break
+                except urllib.error.HTTPError as exc:
+                    if exc.code == 404:  # Previous report may already be committed.
+                        break
+                    log.warning("report not acknowledged for %s", task["task_id"])
+                except Exception:
+                    log.warning("retrying task report for %s", task["task_id"])
+                time.sleep(poll)
         except Exception as e:
             log.error("poll failed: %s", e)
             time.sleep(poll)

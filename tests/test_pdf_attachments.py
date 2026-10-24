@@ -58,7 +58,8 @@ class PdfTests(unittest.TestCase):
         data = pdf_bytes()
         client = Mock()
         client.download_pdf.return_value = data
-        cfg = {"agents": [{"app_id": "app", "allowed_open_ids": ["alice", "bob"]}]}
+        cfg = {"agents": [{"app_id": "app", "allowed_open_ids": ["alice", "bob"],
+                           "access_mode": "shared", "owner_open_id": "alice"}]}
         with patch.object(hub, "CFG", cfg), patch.object(hub, "FEISHU_CLIENTS", {"app": client}), patch.object(hub, "reply"):
             self.send("file1", "file", {"file_name": "paper.pdf", "file_key": "file1"})
             self.send("file1", "file", {"file_name": "paper.pdf", "file_key": "file1"})

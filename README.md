@@ -8,6 +8,8 @@ Windows 单机运行 OpenCode + 飞书请直接使用 [Windows 部署指南](doc
 
 支持发送 PDF 文件后再发送文字处理要求；文字提取、扫描页 OCR 安装与限制见 [PDF 附件指南](docs/pdf-attachments.md)。
 
+默认个人 Agent 独占，可显式配置团队共享与只读/编辑成员；同设备任务串行、不抢占。参见 [多用户与多 Agent 配置](docs/multi-user.md)。
+
 ## 目录结构
 
 ```

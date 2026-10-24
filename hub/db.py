@@ -114,6 +114,11 @@ def init_db():
             for name, kind in (("attachment_id", "TEXT"), ("attachment_receive", "INTEGER DEFAULT 0")):
                 if name not in columns:
                     conn.execute("ALTER TABLE tasks ADD COLUMN %s %s" % (name, kind))
+            if "actor_role" not in columns:
+                conn.execute("ALTER TABLE tasks ADD COLUMN actor_role TEXT DEFAULT 'editor'")
+            if "execution_active" not in columns:
+                conn.execute("ALTER TABLE tasks ADD COLUMN execution_active INTEGER DEFAULT 0")
+                conn.execute("UPDATE tasks SET execution_active=1 WHERE status='running'")
             approval_columns = {row[1] for row in conn.execute("PRAGMA table_info(approvals)")}
             if "card_message_id" not in approval_columns:
                 conn.execute("ALTER TABLE approvals ADD COLUMN card_message_id TEXT")
@@ -239,18 +244,30 @@ def set_workspace_selection(app_id, sender_open_id, alias):
 
 
 def create_task(app_id, device_id, prompt, reply_message_id=None, reply_chat_id=None,
-                work_dir=None, sender_open_id=None, attachment_id=None, attachment_receive=False):
+                work_dir=None, sender_open_id=None, attachment_id=None, attachment_receive=False,
+                actor_role="editor", enforce_limits=False):
     task_id = "t_" + uuid.uuid4().hex[:12]
     with _lock:
         conn = _connect()
         try:
+            conn.execute("BEGIN IMMEDIATE")
+            if enforce_limits:
+                counts = conn.execute("""SELECT count(*), coalesce(sum(sender_open_id=?),0)
+                    FROM tasks WHERE app_id=? AND status='pending'""", (sender_open_id, app_id)).fetchone()
+                if counts[0] >= 20 or counts[1] >= 5:
+                    raise ValueError("排队已达上限（每人 5 项、每 Agent 20 项），请等待已有任务完成")
             conn.execute(
                 """INSERT INTO tasks (task_id, app_id, device_id, prompt,
                                       reply_message_id, reply_chat_id, work_dir,
-                                      sender_open_id, attachment_id, attachment_receive)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                                      sender_open_id, attachment_id, attachment_receive, actor_role)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (task_id, app_id, device_id, prompt, reply_message_id, reply_chat_id,
-                 work_dir, sender_open_id, attachment_id, int(attachment_receive)))
+                 work_dir, sender_open_id, attachment_id, int(attachment_receive), actor_role))
+            conn.execute("COMMIT")
+        except Exception:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
         finally:
             conn.close()
     return task_id
@@ -294,6 +311,28 @@ def current_attachment(app_id, sender_id, chat_id, work_dir, clear=False):
                 AND chat_id=? AND work_dir=? AND active=1 AND created_at>? ORDER BY rowid DESC LIMIT 1""",
                                scope + (int(time.time()) - 86400,)).fetchone()
             return dict(row) if row else None
+        finally:
+            conn.close()
+
+
+def queue_view(app_id, device_id, sender_id):
+    with _lock:
+        conn = _connect()
+        try:
+            busy = conn.execute("SELECT count(*) FROM tasks WHERE device_id=? AND execution_active=1", (device_id,)).fetchone()[0]
+            pending = conn.execute("SELECT count(*) FROM tasks WHERE device_id=? AND status='pending'", (device_id,)).fetchone()[0]
+            own = conn.execute("SELECT count(*) FROM tasks WHERE app_id=? AND sender_open_id=? AND status='pending'", (app_id, sender_id)).fetchone()[0]
+            return "设备执行中：%s；设备等待：%d 项；您在当前 Agent 等待：%d 项。运行任务不会被新请求抢占。" % ("是" if busy else "否", pending, own)
+        finally:
+            conn.close()
+
+
+def user_history(app_id, sender_id):
+    with _lock:
+        conn = _connect()
+        try:
+            rows = conn.execute("SELECT task_id,status,created_at FROM tasks WHERE app_id=? AND sender_open_id=? ORDER BY rowid DESC LIMIT 8", (app_id, sender_id)).fetchall()
+            return "您的最近任务：\n" + ("\n".join("%s %s %s" % tuple(row) for row in rows) or "暂无任务。")
         finally:
             conn.close()
 
@@ -445,6 +484,9 @@ def claim_task(device_id, token):
             if dev is None or dev["token"] != token:
                 conn.execute("ROLLBACK")
                 return None, "invalid device or token"
+            if conn.execute("SELECT 1 FROM tasks WHERE device_id=? AND execution_active=1 LIMIT 1", (device_id,)).fetchone():
+                conn.execute("ROLLBACK")
+                return None, None
             row = conn.execute(
                 """SELECT * FROM tasks
                    WHERE device_id=? AND status='pending'
@@ -454,7 +496,7 @@ def claim_task(device_id, token):
                 conn.execute("ROLLBACK")
                 return None, None
             conn.execute(
-                "UPDATE tasks SET status='running', started_at=datetime('now') WHERE task_id=?",
+                "UPDATE tasks SET status='running', execution_active=1, started_at=datetime('now') WHERE task_id=?",
                 (row["task_id"],))
             agent = conn.execute("SELECT * FROM agents WHERE app_id=?",
                                  (row["app_id"],)).fetchone()
@@ -472,7 +514,7 @@ def claim_task(device_id, token):
                 "command": agent["exec_path"],
                 "work_dir": row["work_dir"] or agent["work_dir"],
                 "base_url": agent["exec_path"],
-                "session_id": agent["session_id"],
+                "session_id": None,
             }
             conn.execute("COMMIT")
             return task, None
@@ -493,15 +535,18 @@ def report_task(task_id, token, result=None, error=None, session_id=None):
                    WHERE t.task_id=?""", (task_id,)).fetchone()
             if row is None or row["device_token"] != token:
                 return None
-            if row["status"] not in ("running", "pending"):
+            if row["status"] == "timeout" and row["execution_active"]:
+                conn.execute("UPDATE tasks SET execution_active=0 WHERE task_id=?", (task_id,))
+                return dict(row)
+            if row["status"] != "running" or not row["execution_active"]:
                 return None
             if error:
                 conn.execute(
-                    "UPDATE tasks SET status='failed', result=?, error=?, finished_at=datetime('now') WHERE task_id=?",
+                    "UPDATE tasks SET status='failed', execution_active=0, result=?, error=?, finished_at=datetime('now') WHERE task_id=?",
                     (result, error, task_id))
             else:
                 conn.execute(
-                    "UPDATE tasks SET status='done', result=?, error=NULL, finished_at=datetime('now') WHERE task_id=?",
+                    "UPDATE tasks SET status='done', execution_active=0, result=?, error=NULL, finished_at=datetime('now') WHERE task_id=?",
                     (result, task_id))
             if session_id:
                 conn.execute("UPDATE agents SET session_id=? WHERE app_id=?",
@@ -531,3 +576,18 @@ def mark_timeout_tasks(seconds):
         finally:
             conn.close()
     return out
+
+
+def release_device_execution(device_id):
+    """Local operator only: caller must first stop Node AND its OpenCode server."""
+    with _lock:
+        conn = _connect()
+        try:
+            changed = conn.execute("""UPDATE tasks SET execution_active=0,
+                status=CASE WHEN status='running' THEN 'failed' ELSE status END,
+                error=coalesce(error,'本机管理员确认执行器停止后释放占用'),
+                finished_at=coalesce(finished_at,datetime('now'))
+                WHERE device_id=? AND execution_active=1""", (device_id,))
+            return changed.rowcount
+        finally:
+            conn.close()

@@ -42,6 +42,7 @@ def main():
                 "app_id": "serve_test", "device_id": "win", "agent_name": "opencode",
                 "display_name": "Windows-OpenCode", "engine_type": "serve",
                 "exec_path": serve_url, "work_dir": str(temp), "app_secret": "sec",
+                "allowed_open_ids": ["u1"],
             }],
         }
         (temp / "hub-config.json").write_text(json.dumps(config), encoding="utf-8")
@@ -79,7 +80,7 @@ def main():
         runtime = NodeRuntime({
             "history_dir": str(temp / "history"),
             "budget_state_path": str(temp / "runtime" / "budget.json"),
-            "budget": {"max_tasks_per_day": 5, "max_runtime_seconds_per_day": 60},
+            "budget": {"max_tasks_per_day": 10, "max_runtime_seconds_per_day": 60},
         }, temp)
         def fake_serve(engine, prompt, timeout, approval_client):
             assert engine["base_url"] == serve_url
@@ -194,8 +195,29 @@ def main():
         hubmod.report(pdf_followup["task_id"], {"token": "tok", "result": result})
         assert fake.replies[-1][-1] == "PDF SUMMARY OK"
 
+        # Team opt-in: the second user's request cannot preempt the first.
+        config["agents"][0].update({"access_mode": "shared", "owner_open_id": "u1",
+                                    "allowed_open_ids": ["u1", "u2"]})
+        send("team-first", "first team task")
+        send("team-second", "second team task", sender="u2")
+        first = hubmod.pull_tasks("win", x_device_token="tok")["task"]
+        assert first["sender_open_id"] == "u1" and first["actor_role"] == "editor"
+        assert hubmod.pull_tasks("win", x_device_token="tok")["task"] is None
+        with patch("node.run_serve", return_value=("first complete", "team-first")):
+            result, _ = execute(first, 30, runtime)
+        hubmod.report(first["task_id"], {"token": "tok", "result": result})
+        second = hubmod.pull_tasks("win", x_device_token="tok")["task"]
+        assert second["sender_open_id"] == "u2" and second["actor_role"] == "reader"
+        assert not second.get("attachment")  # u1's PDF never crosses actors.
+        with patch("node.run_serve", return_value=("second complete", "team-second")):
+            result, _ = execute(second, 30, runtime)
+        hubmod.report(second["task_id"], {"token": "tok", "result": result})
+        send("reader-edit", "/edit note.txt: revise", sender="u2")
+        assert "只读" in fake.replies[-1][-1]
+        assert hubmod.pull_tasks("win", x_device_token="tok")["task"] is None
+
     assert digest(REAL_CONFIG) == before, "real hub/config.json was modified"
-    print("E2E HUB -> NODE -> SERVE -> APPROVE/REJECT -> RECOVERABLE TRASH -> PDF -> REPLY OK")
+    print("E2E HUB -> NODE -> SERVE -> APPROVE/REJECT -> RECOVERABLE TRASH -> PDF -> TEAM FIFO -> REPLY OK")
 
 
 if __name__ == "__main__":

@@ -15,6 +15,8 @@
       "exec_path": "http://127.0.0.1:4096",
       "work_dir": "/Users/example/projects",
       "allowed_open_ids": ["ou_replace_with_your_open_id"],
+      "access_mode": "personal",
+      "owner_open_id": "ou_replace_with_your_open_id",
       "app_secret": "your_feishu_app_secret_1"
     },
     {
@@ -26,6 +28,8 @@
       "exec_path": "http://127.0.0.1:4096",
       "work_dir": "/home/example/projects",
       "allowed_open_ids": ["ou_replace_with_your_open_id"],
+      "access_mode": "personal",
+      "owner_open_id": "ou_replace_with_your_open_id",
       "app_secret": "your_feishu_app_secret_2"
     }
   ]

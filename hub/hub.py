@@ -18,8 +18,10 @@ from db import (
     mark_message_processed, mark_timeout_tasks, message_seen,
     report_task, set_approval_card_message, set_display_name, upsert_agent, upsert_device,
     store_attachment, current_attachment, task_attachment,
+    queue_view, user_history,
 )
 from feishu_client import FeishuClient
+from access import policy, validate_agents, identity
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("hub")
@@ -98,6 +100,17 @@ def handle_message(app_id, message, sender):
         return
 
     configured = next((a for a in CFG.get("agents", []) if a.get("app_id") == app_id), {})
+    try:
+        access = policy(configured)
+    except ValueError as exc:
+        reply(app_id, msg_id, "访问已拒绝：" + str(exc))
+        return
+    role = access["members"].get(sender.get("open_id"))
+    if role is None:
+        return
+    if access["mode"] == "personal" and message.get("chat_type") == "group":
+        reply(app_id, msg_id, "这是个人 Agent，请通过机器人私聊使用。")
+        return
     allowed_senders = configured.get("allowed_open_ids")
     valid_allowlist = isinstance(allowed_senders, list) and all(
         isinstance(item, str) and item for item in allowed_senders)
@@ -118,6 +131,17 @@ def handle_message(app_id, message, sender):
         text = str(message.get("content", "")).strip()
     text = strip_mention(text)
     if not text and not is_file:
+        return
+    if text.lower().startswith(("/edit", "/trash")) and role != "editor":
+        reply(app_id, msg_id, "您在此团队 Agent 中为只读成员，不能编辑或清理文件。")
+        return
+    if text in {"/queue", "/history"}:
+        result = (queue_view(app_id, agent["device_id"], sender["open_id"])
+                  if text == "/queue" else user_history(app_id, sender["open_id"]))
+        reply(app_id, msg_id, result)
+        return
+    if text.lower().split(" ", 1)[0] in {"/cancel", "/stop", "/interrupt"}:
+        reply(app_id, msg_id, "手机端不提供抢占或停止执行；新任务会排队。可发送 /queue 查看状态。")
         return
     if text.lower().startswith(("/trash", "/edit")) and (not valid_allowlist or not allowed_senders):
         reply(app_id, msg_id, "电脑端尚未配置 allowed_open_ids，/trash 与 /edit 已拒绝。")
@@ -202,13 +226,18 @@ def handle_message(app_id, message, sender):
         attachment = current_attachment(app_id, sender_id, message.get("chat_id") or "", selected_dir)
         attachment_id = attachment["id"] if attachment else None
 
-    task_id = create_task(app_id, agent["device_id"], text, msg_id,
-                          message.get("chat_id"), work_dir=selected_dir,
-                          sender_open_id=sender_id, attachment_id=attachment_id,
-                          attachment_receive=is_file)
+    try:
+        task_id = create_task(app_id, agent["device_id"], text, msg_id,
+                              message.get("chat_id"), work_dir=selected_dir,
+                              sender_open_id=sender_id, attachment_id=attachment_id,
+                              attachment_receive=is_file, actor_role=role, enforce_limits=True)
+    except ValueError as exc:
+        reply(app_id, msg_id, str(exc))
+        return
     log.info("task %s queued for %s", task_id, agent["device_id"])
     reply(app_id, msg_id,
-          "【%s】收到，正在处理（task=%s）…" % (agent["display_name"], task_id))
+          "【%s】收到，已入队（task=%s）。%s" % (agent["display_name"], task_id,
+          queue_view(app_id, agent["device_id"], sender_id)))
 
 
 def make_handler(app_id):
@@ -249,7 +278,7 @@ def sweeper():
                 agent = get_agent(t["app_id"])
                 if agent:
                     reply(t["app_id"], t["reply_message_id"],
-                          "【%s】处理超时，已放弃。" % agent["display_name"])
+                          "【%s】任务超时，等待电脑端结束确认；执行占用仍保留，后续任务不会抢占。" % agent["display_name"])
         except Exception:
             log.exception("sweeper error")
 
@@ -258,6 +287,7 @@ def sweeper():
 async def lifespan(_app):
     global CFG
     CFG = load_config()
+    validate_agents([a for a in CFG.get("agents", []) if a.get("enabled", 1)])
     init_db()
     for d in CFG.get("devices", []):
         upsert_device(d["device_id"], d["name"], d["token"])
@@ -268,6 +298,7 @@ async def lifespan(_app):
             engine_type=a["engine_type"], exec_path=a["exec_path"],
             app_secret=a["app_secret"], work_dir=a.get("work_dir"),
             session_id=a.get("session_id"),
+            enabled=a.get("enabled", 1),
         )
     for a in list_agents():
         if not a["enabled"]:
@@ -298,6 +329,19 @@ def pull_tasks(device_id: str, token: str = None,
     task, err = claim_task(device_id, x_device_token or token)
     if err:
         raise HTTPException(status_code=401, detail=err)
+    if task:
+        configured = next((a for a in CFG.get("agents", []) if a.get("app_id") == task["app_id"]), {})
+        try:
+            role = policy(configured)["members"].get(task["sender_open_id"])
+            paths = [configured.get("work_dir")] + list((configured.get("workspaces") or {}).values())
+            if (not role or identity(task["engine"]["work_dir"]) not in {identity(path) for path in paths if path}
+                    or (role != "editor" and task["prompt"].strip().lower().startswith(("/edit", "/trash")))):
+                raise ValueError("authorization changed")
+            task["actor_role"] = role
+        except ValueError:
+            report_task(task["task_id"], x_device_token or token, error="排队期间授权或工作区配置已变化，任务未执行")
+            reply(task["app_id"], task["reply_message_id"], "排队期间授权或工作区配置已变化，任务未执行。")
+            task = None
     return {"task": task}
 
 
@@ -322,12 +366,12 @@ def request_approval(task_id: str, payload: dict,
     permission_id = str(payload.get("permission_id") or "")
     if not session_id or not permission_id or len(session_id) > 128 or len(permission_id) > 128:
         raise HTTPException(status_code=400, detail="invalid session or permission id")
-    safe_change_senders = {
-        agent["app_id"]: allowed
-        for agent in CFG.get("agents", [])
-        if isinstance((allowed := agent.get("allowed_open_ids")), list)
-        and all(isinstance(item, str) and item for item in allowed)
-    }
+    safe_change_senders = {}
+    for agent in CFG.get("agents", []):
+        try:
+            safe_change_senders[agent["app_id"]] = [user for user, role in policy(agent)["members"].items() if role == "editor"]
+        except ValueError:
+            continue
     approval = create_approval(task_id, x_device_token, session_id, permission_id,
                                permission, str(payload.get("detail") or ""),
                                safe_change_senders=safe_change_senders)
