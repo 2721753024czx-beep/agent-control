@@ -112,7 +112,8 @@ def main():
 
         def decide_once(task_id, decision):
             def approval_client(session_id, permission_id, permission, item):
-                assert permission == "safe_change" and "+after" in item["patterns"][0]
+                assert permission == "safe_change"
+                assert ("可恢复清理" if permission_id.startswith("safe-trash-") else "+after") in item["patterns"][0]
                 assert target.read_text(encoding="utf-8") == "before\n"
                 opened = hubmod.request_approval(task_id, {
                     "session_id": session_id, "permission_id": permission_id,
@@ -152,10 +153,23 @@ def main():
                 raise AssertionError("rejected edit was applied")
         assert target.read_text(encoding="utf-8") == "before\n"
 
+        send("trash-reject", "/trash note.txt")
+        trash_reject, error = db.claim_task("win", "tok")
+        assert error is None
+        try:
+            execute(trash_reject, 30, runtime, decide_once(trash_reject["task_id"], "reject"))
+        except PermissionError as exc:
+            hubmod.report(trash_reject["task_id"], {"token": "tok", "error": str(exc)})
+        else:
+            raise AssertionError("rejected trash was applied")
+        assert target.read_text(encoding="utf-8") == "before\n"
+        assert not (temp / ".agent-control-trash").exists()
+
         send("trash-recoverable", "/trash note.txt")
         trash_task, error = db.claim_task("win", "tok")
         assert error is None
-        trash_result, _ = execute(trash_task, 30, runtime)
+        trash_result, _ = execute(trash_task, 30, runtime,
+                                  decide_once(trash_task["task_id"], "approve"))
         assert "可恢复暂存目录" in trash_result and not target.exists()
         manifests = list((temp / ".agent-control-trash").glob("*/manifest.json"))
         assert len(manifests) == 1

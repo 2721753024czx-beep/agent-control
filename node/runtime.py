@@ -7,7 +7,6 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from safe_trash import move_to_trash
 
 
 QUOTA_PATTERNS = (
@@ -229,9 +228,7 @@ class NodeRuntime:
         if command == "/help":
             return "可用命令：/status /queue /skills /memory /history /trash <相对路径> /edit <相对文件>: <要求> /pdf clear /help。共享 Agent 的只读成员不能编辑或清理；任务串行排队。可先发送 PDF，再发文字处理要求。"
         if command.startswith("/trash "):
-            relative = prompt.strip()[7:].strip()
-            manifest = move_to_trash(work_dir, relative, task_id)
-            return "已移到可恢复暂存目录：%s\n原路径：%s" % (manifest["stored"], manifest["original"])
+            raise PermissionError("清理必须经 Node 一次性审批流程执行")
         if command == "/status":
             status = self.budget.status()
             blocked_text = "是" if status["blocked"] else "否"

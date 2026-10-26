@@ -10,6 +10,7 @@ from pathlib import Path
 from engines import run_cli, run_serve
 from runtime import NodeRuntime
 from safe_edit import snapshot, parse_proposal, preview, apply_approved
+from safe_trash import prepare_trash, move_to_trash
 from pdf_attachments import prepare as prepare_pdf, context as pdf_context
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -56,6 +57,27 @@ def execute(task, timeout, runtime=None, approval_client=None):
                 and task["prompt"].strip().lower().startswith(("/edit", "/trash"))):
             raise PermissionError("只读成员不能修改或清理文件")
         engine["serve_password"] = runtime.config.get("serve_password")
+        if task["prompt"].strip().lower().startswith("/trash "):
+            relative = task["prompt"].strip()[7:].strip()
+            try:
+                change = prepare_trash(engine["work_dir"], relative)
+                detail = ("可恢复清理（不永久删除）\n工作区：%s\n目标：%s\n类型：%s；文件数：%d；字节：%d\n"
+                          "指纹：%s\n批准后移动到本工作区 .agent-control-trash/；拒绝或过期保持原位。" %
+                          (engine["work_dir"], relative, change["kind"], change["files"],
+                           change["bytes"], change["sha256"]))
+                if len(detail) > 1800:
+                    raise ValueError("目标描述过长，无法完整展示")
+                if approval_client is None or not approval_client(
+                        "node-trash-" + task["task_id"], "safe-trash-" + task["task_id"],
+                        "safe_change", {"patterns": [detail]}):
+                    raise PermissionError("未批准本次清理（拒绝或过期）；目标保持原位")
+                manifest = move_to_trash(engine["work_dir"], relative, task["task_id"], expected=change)
+                runtime.audit.append("safe_trash_applied", task_id=task["task_id"],
+                                     path=relative, stored=manifest["stored"])
+                return "已批准并移到可恢复暂存目录：%s\n原路径：%s" % (manifest["stored"], relative), None
+            except Exception as exc:
+                runtime.audit.append("safe_trash_failed", task_id=task["task_id"], error=str(exc)[:500])
+                raise
         control_result = runtime.control(task["prompt"], engine.get("work_dir"), task["task_id"])
         if control_result is not None:
             runtime.audit.append("control", task_id=task["task_id"],

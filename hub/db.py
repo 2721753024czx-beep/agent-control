@@ -375,11 +375,18 @@ def create_approval(task_id, token, session_id, permission_id, permission, detai
             if permission == "safe_change":
                 edit = re.fullmatch(r"/edit ([^:\r\n]+):\s*(.+)", task["prompt"].strip(), re.DOTALL)
                 path = edit.group(1).strip() if edit else ""
+                trash = re.fullmatch(r"/trash ([^\r\n]+)", task["prompt"].strip(), re.IGNORECASE)
+                if trash:
+                    path = trash.group(1).strip()
+                    valid_detail = (session_id == "node-trash-" + task_id and detail.startswith(
+                        "可恢复清理（不永久删除）\n工作区：%s\n目标：%s\n" % (task["work_dir"], path)))
+                else:
+                    valid_detail = detail.startswith("--- a/" + path + "\n+++ b/" + path + "\n")
                 if (safe_change_senders is None
                         or task["sender_open_id"] not in safe_change_senders.get(task["app_id"], [])
-                        or permission_id != "safe-edit-" + task_id
+                        or permission_id != ("safe-trash-" if task["prompt"].strip().lower().startswith("/trash ") else "safe-edit-") + task_id
                         or not path or len(detail) > 1800
-                        or not detail.startswith("--- a/" + path + "\n+++ b/" + path + "\n")):
+                        or not valid_detail):
                     conn.execute("ROLLBACK")
                     return None
             existing = conn.execute(

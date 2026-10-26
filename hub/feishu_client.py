@@ -31,7 +31,7 @@ def _ws_loop():
 
 def approval_card(permission, detail, code):
     """One-time approval card; the complete request stays visible as plain text."""
-    label = "单文件修改" if permission == "safe_change" else "只读访问"
+    label = ("可恢复清理" if detail.startswith("可恢复清理（") else "单文件修改") if permission == "safe_change" else "只读访问"
     return {
         "schema": "2.0",
         "config": {"update_multi": True, "width_mode": "default", "enable_forward": False},
