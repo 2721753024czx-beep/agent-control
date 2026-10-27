@@ -8,6 +8,7 @@ import urllib.error
 from pathlib import Path
 
 from engines import run_cli, run_serve
+from codex_engine import run_codex
 from runtime import NodeRuntime
 from safe_edit import snapshot, parse_proposal, preview, apply_approved
 from safe_trash import prepare_trash, move_to_trash
@@ -57,6 +58,9 @@ def execute(task, timeout, runtime=None, approval_client=None):
                 and task["prompt"].strip().lower().startswith(("/edit", "/trash"))):
             raise PermissionError("只读成员不能修改或清理文件")
         engine["serve_password"] = runtime.config.get("serve_password")
+        engine["codex"] = runtime.config.get("codex")
+        engine["audit"] = runtime.audit
+        engine["task_id"] = task["task_id"]
         if task["prompt"].strip().lower().startswith("/trash "):
             relative = task["prompt"].strip()[7:].strip()
             try:
@@ -132,6 +136,8 @@ def execute(task, timeout, runtime=None, approval_client=None):
     try:
         if engine["type"] == "cli":
             result = run_cli(engine, prompt, timeout), None
+        elif engine.get("base_url") == "codex://local":
+            result = run_codex(engine, prompt, timeout, approval_client)
         else:
             result = run_serve(engine, prompt, timeout, approval_client)
         if edit_change is not None:

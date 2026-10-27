@@ -1,5 +1,7 @@
 # Claude Code / Codex 原生引擎接入验证
 
+后续进展：已实现可显式开启的 Mac Codex app-server 适配器及隔离链路验证，见 [Mac多引擎指南](mac-multi-engine.md)。以下保留 v2026.10.27.2 的预研记录，不代表新版适配器仍未实现；Claude及Windows待办不变。
+
 本轮以 v2026.10.27.1 为基线。探针是本机测试工具，不是手机任务执行适配器；当前生产引擎仍为受限 OpenCode。不能仅修改 `exec_path` 或开放 CLI 就认为完成接入。
 
 ## 当前实测

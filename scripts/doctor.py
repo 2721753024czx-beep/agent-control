@@ -31,11 +31,18 @@ def check(root, live=False):
                 assert identity(path) in roots, 'workspace missing from Node allowlist'
                 if 'agent_work_dirs' in node:
                     assert identity(path) in {identity(p) for p in node['agent_work_dirs'].get(agent['app_id'], [])}, 'per-agent allowlist mismatch'
-            assert agent['exec_path'] == 'http://127.0.0.1:' + str(node.get('serve_port', 4096)), 'serve endpoint mismatch'
+            if agent['exec_path'] == 'codex://local':
+                native = node.get('codex') or {}
+                assert sys.platform == 'darwin' and native.get('enabled') is True, 'Mac Codex opt-in required'
+                assert Path(native.get('executable', '')).is_absolute() and Path(native['executable']).is_file(), 'Codex executable missing'
+            else:
+                assert agent['exec_path'] == 'http://127.0.0.1:' + str(node.get('serve_port', 4096)), 'serve endpoint mismatch'
     if live:
         with urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5) as response:
             status = json.load(response)
         assert status.get('ok') and status.get('agents') == len(agents), 'Hub health mismatch'
+        if not any(a['exec_path'].startswith('http://') for a in agents):
+            return len(agents)  # Native model/permissions require the separate live verifier.
         auth = base64.b64encode(('opencode:' + node['serve_password']).encode()).decode()
         endpoint = 'http://127.0.0.1:' + str(node.get('serve_port', 4096))
         def get(path):

@@ -24,6 +24,7 @@ PATTERNS = (
     "scripts/doctor.py",
     "scripts/enroll_identity.py",
     "scripts/probe_native_engines.py",
+    "scripts/verify_codex_adapter.py",
     "scripts/build_windows_bundle.py",
     "scripts/build_macos_bundle.py",
     "scripts/windows/*",

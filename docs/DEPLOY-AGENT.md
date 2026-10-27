@@ -2,12 +2,14 @@
 
 本文件是安装任务指南，不是授权提升工具权限。当前受控运行引擎是 **OpenCode 1.19.0**；安装过程可由其他具备本机终端能力的 Agent 执行，但不能把任意 Agent 当成已适配运行引擎。不要沿用旧文档中的 CLI 模式、无需 Node 依赖、默认开放群聊等描述。
 
+Mac 还可显式启用与 OpenCode 并存的 Codex 实验性适配器，配置与独立验收见 [Mac多引擎指南](mac-multi-engine.md)。下面的首次安装流程默认配置 OpenCode，不自动启用其他引擎。
+
 ## 从没有项目开始
 
 经用户同意，在持久、当前用户拥有的普通目录获取公开源码：
 
 ```bash
-git clone --branch v2026.10.27.2 https://github.com/2721753024czx-beep/agent-control.git
+git clone --branch v2026.10.27.3 https://github.com/2721753024czx-beep/agent-control.git
 cd agent-control
 ```
 
