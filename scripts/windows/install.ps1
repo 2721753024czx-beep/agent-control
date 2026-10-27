@@ -13,6 +13,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+Set-Location $Root
+foreach ($relative in "hub\config.json", "node\config.json", "hub\hub.db") {
+    if (Test-Path (Join-Path $Root $relative)) { throw "检测到已有部署数据，拒绝覆盖。请按 docs/deploy-maintenance.md 升级。" }
+}
+foreach ($name in "AgentControl-OpenCode", "AgentControl-Hub", "AgentControl-Node", "AgentControl-History") {
+    if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) { throw "已有同名计划任务，拒绝覆盖：$name" }
+}
 
 function New-RandomToken {
     $bytes = New-Object byte[] 32
@@ -35,6 +42,7 @@ function ConvertFrom-SecureValue([Security.SecureString]$Value) {
 Write-Host "==> Agent Control Windows installer" -ForegroundColor Cyan
 $Python = (Get-Command python -ErrorAction Stop).Source
 & $Python -c "import sys; assert sys.version_info >= (3,9); print(sys.version)"
+if ($LASTEXITCODE -ne 0) { throw "需要 Python 3.9+" }
 
 $OpenCodeCommand = Get-Command opencode -ErrorAction SilentlyContinue
 if (-not $OpenCodeCommand) {
@@ -61,7 +69,11 @@ if ([IO.Path]::GetExtension($OpenCodePath) -in ".cmd", ".bat") {
     $OpenCodePrefix = @($CliScript)
     Write-Host "已将 npm shim 转换为安全直接调用：node.exe + OpenCode CLI"
 }
-& $OpenCodeExecutable @OpenCodePrefix --version
+$OpenCodeVersion = & $OpenCodeExecutable @OpenCodePrefix --version
+if ($LASTEXITCODE -ne 0 -or ($OpenCodeVersion -join " ") -notmatch '\b1\.19\.0\b') {
+    throw "此版本适配 OpenCode 1.19.0；请勿自动替换已有V2，先人工确认兼容版本。"
+}
+Write-Host "OpenCode 1.19.0 compatibility check passed"
 
 if (-not $WorkDir) { $WorkDir = Read-Host "OpenCode 工作目录（绝对路径）" }
 $WorkDir = (Resolve-Path $WorkDir).Path
@@ -87,9 +99,14 @@ $AppSecret = ConvertFrom-SecureValue $SecretSecure
 if (-not $AppSecret) { throw "App Secret 不能为空" }
 
 $VenvPython = Join-Path $Root ".venv\Scripts\python.exe"
-if (-not (Test-Path $VenvPython)) { & $Python -m venv (Join-Path $Root ".venv") }
+if (-not (Test-Path $VenvPython)) {
+    & $Python -m venv (Join-Path $Root ".venv")
+    if ($LASTEXITCODE -ne 0) { throw "venv创建失败" }
+}
 & $VenvPython -m pip install --upgrade pip
+if ($LASTEXITCODE -ne 0) { throw "pip更新失败" }
 & $VenvPython -m pip install -r (Join-Path $Root "hub\requirements.txt")
+if ($LASTEXITCODE -ne 0) { throw "Hub依赖安装失败" }
 & $VenvPython -m pip install -r (Join-Path $Root "node\requirements.txt")
 if ($LASTEXITCODE -ne 0) { throw "Node 依赖安装失败" }
 if ($InstallPdfOcr) {
@@ -100,7 +117,9 @@ if ($InstallPdfOcr) {
     }
 }
 & $VenvPython -m unittest discover -s (Join-Path $Root "tests") -v
+if ($LASTEXITCODE -ne 0) { throw "单元测试失败，未启动服务" }
 & $VenvPython (Join-Path $Root "e2e_test.py")
+if ($LASTEXITCODE -ne 0) { throw "隔离链路测试失败，未启动服务" }
 
 $DeviceToken = New-RandomToken
 $AdminToken = New-RandomToken
@@ -153,19 +172,15 @@ $RuntimeDir = Join-Path $Root "runtime"
 $BackupDir = Join-Path $Root "backups"
 New-Item -ItemType Directory -Force $LogsDir, $HistoryDir, $RuntimeDir, $BackupDir | Out-Null
 $InstallMarker = Join-Path $RuntimeDir "windows-install.json"
-if (-not (Test-Path $InstallMarker)) {
-    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-    foreach ($relative in "hub\config.json", "node\config.json", "hub\hub.db") {
-        $source = Join-Path $Root $relative
-        if (Test-Path $source) {
-            $backupName = ($relative -replace "[\\/]", "-") + ".before-windows-$stamp"
-            Copy-Item $source (Join-Path $BackupDir $backupName)
-        }
-    }
-    Remove-Item (Join-Path $Root "hub\hub.db"), (Join-Path $Root "hub\hub.db-shm"), (Join-Path $Root "hub\hub.db-wal") -Force -ErrorAction SilentlyContinue
-}
 Write-Utf8NoBom (Join-Path $Root "hub\config.json") ($HubConfig | ConvertTo-Json -Depth 8)
 Write-Utf8NoBom (Join-Path $Root "node\config.json") ($NodeConfig | ConvertTo-Json -Depth 8)
+$CurrentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+foreach ($relative in "hub\config.json", "node\config.json") {
+    & icacls (Join-Path $Root $relative) /inheritance:r /grant:r "*$($CurrentSid):(F)" "*S-1-5-18:(F)" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "凭据ACL设置失败，未启动服务" }
+}
+& $VenvPython (Join-Path $Root "scripts\doctor.py")
+if ($LASTEXITCODE -ne 0) { throw "配置校验失败，未启动服务" }
 
 $MemoryDir = Join-Path $WorkDir ".agent-memory"
 New-Item -ItemType Directory -Force $MemoryDir | Out-Null
@@ -195,7 +210,7 @@ $MemoryRule = @'
 if (-not (Test-Path $AgentsPath)) {
     Write-Utf8NoBom $AgentsPath ("# Project Agent Instructions`r`n" + $MemoryRule)
 } elseif (-not (Select-String -Path $AgentsPath -SimpleMatch "共享记忆强制约定" -Quiet)) {
-    [IO.File]::AppendAllText($AgentsPath, $MemoryRule, (New-Object Text.UTF8Encoding($false)))
+    Write-Warning "已有 AGENTS.md 保留原样；请审阅后自行补入共享记忆约定。"
 }
 
 if (-not $SkipLarkCliBind) {

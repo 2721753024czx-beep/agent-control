@@ -12,6 +12,7 @@ from build_windows_bundle import build  # noqa: E402
 
 
 class WindowsBundleTests(unittest.TestCase):
+    @unittest.skipUnless((ROOT / 'scripts/windows/install.ps1').exists(), 'not a Windows/source bundle')
     def test_bundle_contains_installer_and_no_runtime_secrets(self):
         with tempfile.TemporaryDirectory() as temp_name:
             output = Path(temp_name) / "bundle.zip"

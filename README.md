@@ -2,7 +2,26 @@
 
 通过飞书手机端远程控制无公网 IP 电脑上的本地 OpenCode Agent，查看工作目录、处理一次性审批并接收最终答案。当前受限执行链路针对 OpenCode；其他 Agent 引擎尚未完成同等级安全适配。
 
-设计文档见 `docs/design.md`，飞书应用创建与 Tailscale 组网见 `docs/phase2-setup.md`。
+## 新电脑安装与 Agent 交接
+
+把 [部署执行入口](docs/DEPLOY-AGENT.md) 交给新电脑的本地 Agent，按 [macOS](docs/deploy-macos.md) 或 [Windows](docs/deploy-windows.md) 指南执行。包括飞书配置、身份登记、首次安装、后台服务、诊断、验收及维护。
+
+可把下面这段交给目标电脑的 Agent：
+
+> 从 https://github.com/2721753024czx-beep/agent-control 获取 v2026.10.27.1，先阅读 docs/DEPLOY-AGENT.md，再按本机系统执行安装。使用我的本机身份和新飞书应用；Secret 让我在本机隐藏输入。已有部署先走维护流程。完成后按验收清单报告通过与未完成项。
+
+两端共用核心源码，分别提供安装入口。当前适配 **OpenCode V1 1.19.0**；目标电脑仍需 Python、兼容 OpenCode 和可用模型登录。默认个人独占，团队需显式配置。新安装器尚待干净 Mac 和 Windows 实机全流程验收。
+
+从源码生成不含本机配置的分平台包：
+
+```bash
+python3 scripts/build_macos_bundle.py
+python3 scripts/build_windows_bundle.py
+```
+
+输出在 `dist/`，包内附 `MANIFEST.sha256`。不得分发本机配置、数据库、日志、附件或个人记忆。安装后按 [验收清单](docs/deploy-acceptance.md) 记录实际结果，更新与卸载见 [维护指南](docs/deploy-maintenance.md)。
+
+设计见 `docs/design.md`，跨机组网见 `docs/phase2-setup.md`。以下为手动配置参考，首次单机安装优先使用上述分平台指南。
 
 Windows 单机运行 OpenCode + 飞书请直接使用 [Windows 部署指南](docs/windows-opencode-feishu.md) 和 `scripts/windows/install.ps1`。Hub 与 Node 同机时不需要 Tailscale。
 
@@ -37,7 +56,7 @@ Windows 单机运行 OpenCode + 飞书请直接使用 [Windows 部署指南](doc
 
 ### 1. 前置准备
 - 按 `docs/phase2-setup.md` 完成：创建飞书应用、开启机器人、加权限、开**长连接模式**事件订阅、发布版本。
-- 所有设备装好 Tailscale 并登录同一账号，记下 Hub 电脑的 Tailscale IP。
+- Hub 与 Node 分机部署时配置受保护的组网并记下 Hub 地址；同机部署不需要 Tailscale。
 - 在每台 Node 电脑启动受密码保护的回环 OpenCode `serve`；安全规则和 macOS 启动方式见 [手机端控制设计](docs/mobile-control-design.md)。同机 Windows 安装可直接使用自动配置的安装器。
 
 ### 2. 配置 Hub（在 Hub 电脑上）
@@ -61,9 +80,9 @@ python hub.py          # 监听 0.0.0.0:8000
 | `engine_type` | 手机任务必须为 `serve`；`cli` 会被 Node 拒绝 |
 | `exec_path` | Node 本机受保护服务地址，如 `http://127.0.0.1:4096` |
 | `work_dir` | Agent 的默认工作目录；须在 Node 的 `allowed_work_dirs` 内 |
-| `allowed_open_ids` | 可使用 `/edit` 和 `/trash` 的飞书发送者白名单；示例占位值必须替换 |
+| `allowed_open_ids` | 可访问该 Agent 的发送者白名单；配合所有者及成员角色，示例占位值必须替换 |
 
-启动后日志出现 `ws started for ...` 即表示与飞书的长连接已建立。
+`ws started for ...` 仅表示连接线程启动；须以真实飞书消息和回复确认连接可用。
 
 ### 3. 配置 Node（每台目标电脑上）
 
