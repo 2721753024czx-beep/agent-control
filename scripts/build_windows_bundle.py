@@ -23,6 +23,7 @@ PATTERNS = (
     "scripts/configure_local.py",
     "scripts/doctor.py",
     "scripts/enroll_identity.py",
+    "scripts/probe_native_engines.py",
     "scripts/build_windows_bundle.py",
     "scripts/build_macos_bundle.py",
     "scripts/windows/*",

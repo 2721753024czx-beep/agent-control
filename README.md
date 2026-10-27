@@ -8,7 +8,7 @@
 
 可把下面这段交给目标电脑的 Agent：
 
-> 从 https://github.com/2721753024czx-beep/agent-control 获取 v2026.10.27.1，先阅读 docs/DEPLOY-AGENT.md，再按本机系统执行安装。使用我的本机身份和新飞书应用；Secret 让我在本机隐藏输入。已有部署先走维护流程。完成后按验收清单报告通过与未完成项。
+> 从 https://github.com/2721753024czx-beep/agent-control 获取 v2026.10.27.2，先阅读 docs/DEPLOY-AGENT.md，再按本机系统执行安装。使用我的本机身份和新飞书应用；Secret 让我在本机隐藏输入。已有部署先走维护流程。完成后按验收清单报告通过与未完成项。
 
 两端共用核心源码，分别提供安装入口。当前适配 **OpenCode V1 1.19.0**；目标电脑仍需 Python、兼容 OpenCode 和可用模型登录。默认个人独占，团队需显式配置。新安装器尚待干净 Mac 和 Windows 实机全流程验收。
 
@@ -28,6 +28,8 @@ Windows 单机运行 OpenCode + 飞书请直接使用 [Windows 部署指南](doc
 支持发送 PDF 文件后再发送文字处理要求；文字提取、扫描页 OCR 安装与限制见 [PDF 附件指南](docs/pdf-attachments.md)。
 
 默认个人 Agent 独占，可显式配置团队共享与只读/编辑成员；同设备任务串行、不抢占。参见 [多用户与多 Agent 配置](docs/multi-user.md)。
+
+Claude Code／Codex 原生接入的实测状态、探针和适配方案见 [原生引擎验证](docs/native-engines.md)。探针通过不代表已支持从飞书调度该引擎，当前生产仍使用 OpenCode。
 
 ## 目录结构
 
