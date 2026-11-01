@@ -64,6 +64,15 @@ class CodexReadTests(unittest.TestCase):
 
 
 class CodexGateTests(unittest.TestCase):
+    def test_unverified_version_never_starts_app_server(self):
+        with patch('codex_engine.sys.platform', 'darwin'), \
+             patch('codex_engine.subprocess.run', return_value=SimpleNamespace(returncode=0, stdout='codex-cli 99.0.0')), \
+             patch('codex_engine.subprocess.Popen') as process:
+            with self.assertRaisesRegex(ValueError, '版本未经'):
+                run_codex({'work_dir': '/nonexistent', 'codex': {
+                    'enabled': True, 'executable': sys.executable}}, 'hello', 5)
+            process.assert_not_called()
+
     def test_opt_in_required_before_starting_process(self):
         with patch('codex_engine.subprocess.Popen') as process:
             with self.assertRaises(PermissionError):

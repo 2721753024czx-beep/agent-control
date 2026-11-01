@@ -19,6 +19,7 @@ import uuid
 from collections import deque
 
 VERSION = 'codex-cli 0.164.0-alpha.11.1'
+SUPPORTED_VERSIONS = frozenset({VERSION, 'codex-cli 0.166.0-alpha.5.1'})
 
 
 class EngineStillRunning(BaseException):
@@ -168,8 +169,8 @@ def run_codex(engine, prompt, timeout, on_permission=None):
     if not executable or not Path(executable).is_absolute() or not Path(executable).is_file():
         raise ValueError('须在Node本机配置Codex可执行文件绝对路径')
     version = subprocess.run([executable, '--version'], capture_output=True, text=True, timeout=10)
-    if version.returncode or version.stdout.strip() != VERSION:
-        raise ValueError('Codex版本未经此适配器验证')
+    if version.returncode or version.stdout.strip() not in SUPPORTED_VERSIONS:
+        raise ValueError('Codex版本未经此适配器验证；请在电脑端复测兼容性后更新支持版本')
     root = Path(engine['work_dir']).resolve(strict=True)
     deadline = time.monotonic() + timeout
     overrides = {'features.' + name: False for name in DISABLED}

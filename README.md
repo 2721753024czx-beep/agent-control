@@ -8,7 +8,7 @@
 
 可把下面这段交给目标电脑的 Agent：
 
-> 从 https://github.com/2721753024czx-beep/agent-control 获取 v2026.10.27.3，先阅读 docs/DEPLOY-AGENT.md，再按本机系统执行安装。使用我的本机身份和新飞书应用；Secret 让我在本机隐藏输入。已有部署先走维护流程。完成后按验收清单报告通过与未完成项。
+> 从 https://github.com/2721753024czx-beep/agent-control 获取 v2026.11.01.1，先阅读 docs/DEPLOY-AGENT.md，再按本机系统执行安装。使用我的本机身份和新飞书应用；Secret 让我在本机隐藏输入。已有部署先走维护流程。完成后按验收清单报告通过与未完成项。
 
 两端共用核心源码，分别提供安装入口。当前适配 **OpenCode V1 1.19.0**；目标电脑仍需 Python、兼容 OpenCode 和可用模型登录。默认个人独占，团队需显式配置。新安装器尚待干净 Mac 和 Windows 实机全流程验收。
 
