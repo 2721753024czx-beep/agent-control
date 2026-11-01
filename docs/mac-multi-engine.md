@@ -30,6 +30,25 @@
 
 运行 `scripts/doctor.py` 检查配置；`--live` 仅检查现有 HTTP 服务，不能证明 Codex 模型通过。新代码通过回归后，确认空闲再定向重载 Hub/Node，不重装或停止 OpenCode 服务。
 
+## 固定后台版本，隔离桌面更新
+
+不要长期把 Node 的 `codex.executable` 指向 `/Applications/ChatGPT.app/...`，桌面更新会替换其中的 CLI。先将已验证版本保存到本项目忽略的 `runtime/codex/`：
+
+```bash
+python3 scripts/pin_codex.py --source /absolute/path/to/installed/codex
+```
+
+脚本仅接受已支持版本，按版本和 SHA256 创建独立目录，已有可执行文件校验失败则停止，不覆盖旧运行时。若源自 `.app`，保留完整签名应用包、配置描述文件和扩展属性；若属于桌面内置 `codex-cli` 包，还保存同包的 code-mode host 等辅助程序和资源。仅复制内部可执行文件可能被 macOS 终止；缺少配套辅助程序会导致工具调用失败。脚本不下载客户端，不复制登录配置，不修改 Node，不重启服务。
+
+使用输出的绝对路径分别运行核心与边界测试：
+
+```bash
+python3 scripts/verify_codex_adapter.py --live --executable /printed/path/to/codex
+python3 scripts/verify_codex_adapter.py --live --checks boundaries --executable /printed/path/to/codex
+```
+
+通过后暂停提交，确认队列与执行占用均为零，备份 `node/config.json`，仅将 `codex.executable` 改为该路径并定向重载 Node。桌面以后更新时，后台继续使用已保存版本。后台升级须显式测试、切换；旧版保留用于回退。固定版本仍可能受到服务端协议、账号或模型变更影响，不代表永久免维护。运行时二进制与认证、配置均不随项目发布包上传。
+
 ## 安全和能力边界
 
 - Codex 实际 cwd 是空临时目录，随机命名权限配置档仅允许该目录和平台最小运行路径只读，工具网络关闭。项目内容只能由 Node 受控接口传入。[官方权限配置档](https://learn.chatgpt.com/docs/permissions)

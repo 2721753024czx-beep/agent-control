@@ -9,7 +9,7 @@ Mac 还可显式启用与 OpenCode 并存的 Codex 实验性适配器，配置�
 经用户同意，在持久、当前用户拥有的普通目录获取公开源码：
 
 ```bash
-git clone --branch v2026.11.01.1 https://github.com/2721753024czx-beep/agent-control.git
+git clone --branch v2026.11.01.2 https://github.com/2721753024czx-beep/agent-control.git
 cd agent-control
 ```
 
