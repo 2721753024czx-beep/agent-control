@@ -2,7 +2,7 @@
 
 通过飞书手机端远程控制无公网 IP 电脑上的本地 Agent，查看工作目录、处理一次性审批并接收最终答案。Mac 已完成 OpenCode 和 Codex 并存的手机端验收。
 
-[AI 协作项目说明](docs/agent-project-application.md)
+Mac 已实测读取与编辑审批、团队权限、跨引擎排队、PDF 自动关联隔离，以及 Node 重启后的 Codex 读取恢复。Codex 后台使用独立保存的固定版本，部署方法见 [Mac 多引擎指南](docs/mac-multi-engine.md)。Windows 已提供 OpenCode 安装脚本和部署指南，实机验收仍待完成。Claude Code 尚未接入。
 
 ## 新电脑安装与 Agent 交接
 
