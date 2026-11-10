@@ -1,6 +1,8 @@
 # Networked Agent Remote Control
 
-通过飞书手机端远程控制无公网 IP 电脑上的本地 OpenCode Agent，查看工作目录、处理一次性审批并接收最终答案。当前受限执行链路针对 OpenCode；其他 Agent 引擎尚未完成同等级安全适配。
+通过飞书手机端远程控制无公网 IP 电脑上的本地 Agent，查看工作目录、处理一次性审批并接收最终答案。Mac 已完成 OpenCode 和 Codex 并存的手机端验收。
+
+[AI 协作项目说明](docs/agent-project-application.md)
 
 ## 新电脑安装与 Agent 交接
 
